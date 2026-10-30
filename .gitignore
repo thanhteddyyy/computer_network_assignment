@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+downloads/*
+!downloads/.gitkeep
+logs/
+*.log
+cwnd_*.csv
+.DS_Store
+.idea/
+.vscode/

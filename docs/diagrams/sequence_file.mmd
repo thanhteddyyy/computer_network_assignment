@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant A as Người gửi
+  participant S as Server
+  participant B as Người nhận
+  A->>S: TCP FILE_OFFER {client_ref, to, name, size, sha256}
+  S-->>A: TCP FILE_OFFER_ACK {client_ref, file_id}
+  S->>B: TCP FILE_OFFER {file_id, from, name, size, sha256}
+  B->>S: TCP FILE_ACCEPT {file_id}
+  S->>A: TCP FILE_ACCEPT {file_id}
+  loop từng chunk 1100 byte
+    A->>S: UDP DATA stream=100+file_id
+    S->>B: UDP DATA stream=100+file_id (relay ngay)
+  end
+  B->>B: Kiểm tra SHA-256
+  B->>S: TCP FILE_DONE {file_id, ok}
+  S->>A: TCP FILE_DONE {file_id, ok}

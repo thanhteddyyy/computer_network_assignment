@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Collab LAN</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Màn hình đăng nhập -->
+  <main id="login-view" class="login" hidden>
+    <form id="login-form" class="login-card" autocomplete="off">
+      <h1>Collab LAN</h1>
+      <p class="hint">Nhắn tin và gửi file trong mạng nội bộ, không cần Internet.</p>
+      <label>Địa chỉ server
+        <input id="f-server" placeholder="Để trống để tự tìm trong LAN">
+      </label>
+      <label>Tên đăng nhập
+        <input id="f-user" required minlength="3" maxlength="20">
+      </label>
+      <label>Mật khẩu
+        <input id="f-pass" type="password" required minlength="4">
+      </label>
+      <div class="row">
+        <button type="submit" class="primary">Đăng nhập</button>
+        <button type="button" id="btn-register">Tạo tài khoản</button>
+      </div>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </main>
+
+  <!-- Màn hình chính -->
+  <div id="app-view" class="app" hidden>
+    <header class="topbar">
+      <strong class="brand">Collab LAN</strong>
+      <span id="conn-state" class="conn"></span>
+      <span class="spacer"></span>
+      <span id="me" class="me"></span>
+      <button id="btn-logout">Đăng xuất</button>
+    </header>
+
+    <nav class="sidebar" aria-label="Cuộc trò chuyện">
+      <button class="channel active" data-chat="*"># Phòng chung</button>
+      <h2>Đang online <span id="online-count"></span></h2>
+      <ul id="user-list"></ul>
+    </nav>
+
+    <section class="chat" aria-label="Tin nhắn">
+      <h2 id="chat-title"># Phòng chung</h2>
+      <ol id="messages"></ol>
+      <form id="send-form" class="composer">
+        <label class="attach" title="Gửi file">
+          <input id="file-input" type="file" hidden>📎
+        </label>
+        <input id="msg-input" placeholder="Nhập tin nhắn" autocomplete="off">
+        <button type="submit" class="primary">Gửi</button>
+      </form>
+    </section>
+
+    <aside class="panel" aria-label="Trạng thái mạng và file">
+      <h2>Kết nối</h2>
+      <dl id="stats" class="stats"></dl>
+      <h2>Truyền file</h2>
+      <ul id="transfers" class="transfers"><li class="empty">Chưa có file nào.</li></ul>
+    </aside>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+/* Bảng màu: xanh cổ vịt của dây mạng trên nền xám mát. Font hệ thống vì app chạy trong LAN không có Internet. */
+:root {
+  --canvas: #eef2f1;
+  --surface: #ffffff;
+  --ink: #17212b;
+  --muted: #5e6b73;
+  --line: #d5dddc;
+  --accent: #0e6e6e;
+  --accent-ink: #ffffff;
+  --mine: #dcefed;
+  --ok: #2f8f4e;
+  --warn: #b8701a;
+  --bad: #b3261e;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #121a1f;
+    --surface: #1a242b;
+    --ink: #e4ecee;
+    --muted: #93a3aa;
+    --line: #2b3840;
+    --accent: #4fb3b0;
+    --accent-ink: #0d1b1d;
+    --mine: #1f3a3c;
+    --ok: #5cc27e;
+    --warn: #e0a24f;
+    --bad: #f08a80;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+h1 { font-size: 1.75rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+h2 { font-size: .95rem; font-weight: 600; color: var(--muted); margin: 1.25rem 0 .5rem; }
+button, input { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line); background: var(--surface); padding: .45rem .9rem;
+  border-radius: 6px; cursor: pointer;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:hover { filter: brightness(.96); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input {
+  width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--canvas);
+}
+.error { color: var(--bad); min-height: 1.5em; margin: .5rem 0 0; }
+.hint { color: var(--muted); margin: 0 0 1.25rem; }
+.row { display: flex; gap: .5rem; margin-top: 1rem; }
+[hidden] { display: none !important; }
+
+/* ---------- Đăng nhập */
+.login { min-height: 100%; display: grid; place-items: center; padding: 1rem; }
+.login-card {
+  width: min(380px, 100%); background: var(--surface); padding: 2rem;
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.login-card label { display: block; margin-top: .9rem; font-size: .9rem; color: var(--muted); }
+.login-card input { margin-top: .3rem; color: var(--ink); }
+
+/* ---------- Bố cục chính */
+.app {
+  height: 100%;
+  display: grid;
+  grid-template: "top top top" auto "side chat panel" 1fr / 220px 1fr 280px;
+}
+.topbar {
+  grid-area: top; display: flex; align-items: center; gap: .9rem;
+  padding: .6rem 1rem; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { font-size: 1.05rem; }
+.spacer { flex: 1; }
+.me { color: var(--muted); }
+.conn { display: inline-flex; align-items: center; gap: .4rem; font-size: .9rem; color: var(--muted); }
+.conn::before { content: ""; width: .6rem; height: .6rem; border-radius: 50%; background: var(--bad); }
+.conn.up::before { background: var(--ok); }
+.conn.slow::before { background: var(--warn); }
+
+.sidebar { grid-area: side; padding: 1rem; border-right: 1px solid var(--line); overflow-y: auto; }
+.channel, #user-list button {
+  display: block; width: 100%; text-align: left; border: 0; background: none; padding: .4rem .55rem;
+  border-radius: 6px;
+}
+.channel.active, #user-list button.active { background: var(--mine); }
+#user-list { list-style: none; padding: 0; margin: 0; }
+#user-list .addr { display: block; font-size: .78rem; color: var(--muted); }
+#user-list .badge {
+  float: right; background: var(--accent); color: var(--accent-ink); border-radius: 999px;
+  font-size: .75rem; padding: 0 .45rem;
+}
+
+.chat { grid-area: chat; display: flex; flex-direction: column; min-width: 0; }
+.chat h2 { margin: 0; padding: .9rem 1.25rem; color: var(--ink); font-size: 1rem; border-bottom: 1px solid var(--line); }
+#messages { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 1rem 1.25rem; }
+#messages li { max-width: 68ch; margin: 0 0 .8rem; }
+#messages .who { font-weight: 600; margin-right: .5rem; }
+#messages time { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+#messages .text { margin: .15rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#messages li.mine { margin-left: auto; background: var(--mine); padding: .5rem .75rem; border-radius: 8px; }
+#messages li.system { color: var(--muted); font-size: .88rem; }
+#messages .empty { color: var(--muted); }
+.composer { display: flex; gap: .5rem; padding: .75rem 1.25rem; border-top: 1px solid var(--line); background: var(--surface); }
+.attach { display: grid; place-items: center; width: 2.4rem; cursor: pointer; font-size: 1.15rem; }
+
+.panel { grid-area: panel; padding: 0 1rem 1rem; border-left: 1px solid var(--line); overflow-y: auto; }
+.stats { display: grid; grid-template-columns: auto 1fr; gap: .3rem .75rem; margin: 0; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.transfers { list-style: none; padding: 0; margin: 0; }
+.transfers li { padding: .6rem 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.transfers .name { font-weight: 600; overflow-wrap: anywhere; }
+.transfers .meta { color: var(--muted); font-size: .82rem; }
+.transfers progress { width: 100%; height: .5rem; accent-color: var(--accent); }
+.transfers .actions { display: flex; gap: .4rem; margin-top: .35rem; }
+.transfers .failed { color: var(--bad); }
+.transfers .empty { color: var(--muted); }
+
+@media (max-width: 900px) {
+  .app { grid-template: "top" auto "side" auto "chat" 1fr "panel" auto / 1fr; }
+  .sidebar, .panel { border: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }

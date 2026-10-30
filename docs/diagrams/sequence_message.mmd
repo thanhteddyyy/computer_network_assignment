@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant A as Client A
+  participant S as Server
+  participant B as Client B
+  Note over A,S: Đã HELLO, KEY_EXCHANGE, AUTH_OK
+  A->>S: UDP DATA pn=41 stream=1 off=0 FIN {"to":"*","text":"hi"}
+  S-->>A: UDP ACK largest=41
+  S->>B: UDP DATA pn=17 stream=1 {"type":"MSG","from":"A",...}
+  Note over S,B: Gói bị mất trên đường
+  S->>B: (sau RTO) UDP DATA pn=19 stream=1, cùng offset, packet number mới
+  B-->>S: UDP ACK largest=19
+  S->>A: UDP DATA stream=1 (bản xác nhận có msg_id)

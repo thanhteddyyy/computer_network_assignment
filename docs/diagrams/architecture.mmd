@@ -1,0 +1,16 @@
+flowchart LR
+  subgraph MayA[Máy người dùng A]
+    BA[Trình duyệt<br/>HTML + JS thuần] -- "HTTP polling<br/>127.0.0.1:8081" --> CA[Client Python<br/>UI layer · App logic · Transport]
+  end
+  subgraph MayB[Máy người dùng B]
+    BB[Trình duyệt] -- "HTTP<br/>127.0.0.1:8081" --> CB[Client Python]
+  end
+  subgraph Srv[Server]
+    S[Session manager · Auth<br/>Router · File relay<br/>Transport]
+  end
+  CA -- "TCP 9000: điều khiển (AES-GCM)" --> S
+  CA <-- "UDP 9001: chat + file (giao thức tin cậy tự viết)" --> S
+  CB -- "TCP 9000" --> S
+  CB <-- "UDP 9001" --> S
+  S -. "UDP broadcast 9002: ANNOUNCE" .-> CA
+  S -. "UDP broadcast 9002" .-> CB
