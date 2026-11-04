@@ -2,6 +2,7 @@
 
 Trạng thái: KHUNG + TODO cho người B (ngày 1).
 """
+import asyncio
 import random
 import time
 from dataclasses import dataclass, field
@@ -42,12 +43,16 @@ class SessionManager:
                 return sid
 
     def add(self, client: ClientSession) -> None:
-        """TODO[B-D1]: thêm vào cả 2 dict. Nếu username đã online -> raise ValueError("đã đăng nhập ở nơi khác")."""
-        raise NotImplementedError("TODO[B-D1] SessionManager.add")
+        if client.username in self._by_name:
+            raise ValueError("đã đăng nhập ở nơi khác")
+        self._by_name[client.username] = client       # ghi vào sổ theo tên
+        self._by_id[client.session_id] = client       # ghi vào sổ theo session_id
 
     def remove(self, username: str) -> ClientSession | None:
-        """TODO[B-D1]: xóa khỏi cả 2 dict, trả về ClientSession đã xóa (hoặc None)."""
-        raise NotImplementedError("TODO[B-D1] SessionManager.remove")
+        client = self._by_name.pop(username, None)    # xóa khỏi sổ theo tên; không có thì trả None
+        if client is not None:
+            self._by_id.pop(client.session_id, None)  # xóa luôn khỏi sổ theo id
+        return client
 
     def get(self, username: str) -> ClientSession | None:
         return self._by_name.get(username)
@@ -59,18 +64,15 @@ class SessionManager:
         return list(self._by_name.values())
 
     def online_users(self) -> list[dict]:
-        """TODO[B-D1]: danh sách public_info() của mọi client, sắp xếp theo username."""
-        raise NotImplementedError("TODO[B-D1] SessionManager.online_users")
+        return [c.public_info() for c in sorted(self.all(), key=lambda c: c.username)]
 
     async def broadcast(self, msg: dict, exclude: str | None = None) -> None:
-        """Gửi message TCP tới mọi client (trừ exclude).
-
-        TODO[B-D1]:
-          - Gửi SONG SONG bằng asyncio.gather(..., return_exceptions=True) để một client chậm
-            không làm cả server chờ.
-          - Client nào gửi lỗi (ChannelClosed) thì chỉ log, việc dọn dẹp do handler của client đó lo.
-        """
-        raise NotImplementedError("TODO[B-D1] SessionManager.broadcast")
+        targets = [c for c in self.all() if c.username != exclude]                     # (1)
+        results = await asyncio.gather(*(c.control.send(msg) for c in targets),         # (2)
+                                       return_exceptions=True)
+        for c, r in zip(targets, results):                                              # (3)
+            if isinstance(r, Exception):
+                log.warning("không gửi được %s cho %s: %r", msg.get("type"), c.username, r)
 
     def print_table(self) -> None:
         """In bảng user cho log server (bằng chứng cho bước 3 khi demo)."""

@@ -41,7 +41,7 @@ INITIAL_CWND = 10        # gói
 MIN_CWND = 2
 CUBIC_C = 0.4
 CUBIC_BETA = 0.7
-
+ENABLE_UDP = False
 # ---------------------------------------------------------------- Heartbeat / discovery
 HEARTBEAT_INTERVAL = 2.0
 HEARTBEAT_TIMEOUT = 6.0  # Mất 3 heartbeat liên tiếp -> offline

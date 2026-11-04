@@ -13,7 +13,7 @@ Trạng thái: connect/HELLO và vòng điều khiển HOÀN THIỆN; trao khóa
 import argparse
 import asyncio
 
-from common.config import HTTP_BASE_PORT, PROTOCOL_VERSION, TCP_PORT
+from common.config import ENABLE_UDP, HTTP_BASE_PORT, PROTOCOL_VERSION, TCP_PORT
 from common.crypto import KeyExchange, SessionKeys
 from common.log import get_logger, setup_logging
 from common.messages import ProtocolError, T, expect, make
@@ -74,35 +74,47 @@ class CollabClient:
             raise
 
     async def _key_exchange(self) -> SessionKeys:
-        """TODO[A-D1]: phía client (ngược với server):
-          1. kx = KeyExchange()
-          2. await self.ch.send(make(T.KEY_EXCHANGE, public_key=kx.public_bytes().hex()))
-          3. msg = expect(await self.ch.recv(timeout=10), T.KEY_EXCHANGE)
-          4. keys = kx.derive(bytes.fromhex(msg["public_key"])); self.ch.enable_encryption(keys.tcp_key)
-          5. return keys
-        """
-        raise NotImplementedError("TODO[A-D1] CollabClient._key_exchange")
+        kx = KeyExchange()
+        await self.ch.send(make(T.KEY_EXCHANGE, public_key=kx.public_bytes().hex()))  # GỬI trước
+        msg = expect(await self.ch.recv(timeout=10), T.KEY_EXCHANGE)                  # rồi NHẬN
+        try:
+            peer_public = bytes.fromhex(msg["public_key"])
+        except (KeyError, ValueError) as exc:
+            raise ProtocolError("server gửi public_key không hợp lệ") from exc
+        if len(peer_public) != 32:
+            raise ProtocolError("server gửi public_key sai độ dài")
+        keys = kx.derive(peer_public)
+        self.ch.enable_encryption(keys.tcp_key)
+        return keys
 
     async def register(self, username: str, password: str) -> tuple[bool, str]:
-        """TODO[B-D1]: gửi REGISTER, chờ phản hồi (REGISTER ok / AUTH_FAIL), trả (ok, lý do)."""
-        raise NotImplementedError("TODO[B-D1] CollabClient.register")
-
+        await self.ch.send(make(T.REGISTER, username=username, password=password))
+        resp = await self.ch.recv(timeout=10)
+        if resp.get("type") == T.REGISTER and resp.get("ok"):
+            return True, "đăng ký thành công"
+        return False, resp.get("reason", "đăng ký thất bại")
+    
     async def login(self, username: str, password: str) -> tuple[bool, str]:
-        """TODO[B-D1]:
-          1. self.endpoint = await UdpEndpoint.open("0.0.0.0", 0, self.loss)   # cổng UDP ngẫu nhiên
-          2. gửi AUTH_REQ {username, password, udp_port: self.endpoint.local_port}
-          3. resp = await self.ch.recv(timeout=10)
-             - AUTH_FAIL -> đóng endpoint, return (False, resp["reason"])
-             - AUTH_OK   -> self.username, self.session_id = ...
-                            self.users = {u["username"]: u for u in resp["users"]}
-                            self._start_udp_session((self.server_host, resp["udp_port"]))
-                            self._control_task = asyncio.create_task(self._control_loop())
-                            self.chat.start()
-                            self._set_state("AUTHENTICATED", username)
-                            self.events.add("users", users=list(self.users.values()))
-                            return (True, "ok")
-        """
-        raise NotImplementedError("TODO[B-D1] CollabClient.login")
+        self.endpoint = await UdpEndpoint.open("0.0.0.0", 0, self.loss)             # (1)
+        await self.ch.send(make(T.AUTH_REQ, username=username, password=password,
+                                udp_port=self.endpoint.local_port))                 # (2)
+        resp = await self.ch.recv(timeout=10)
+        if resp.get("type") != T.AUTH_OK:                                           # (3)
+            self.endpoint.close()
+            self.endpoint = None
+            return False, resp.get("reason", "đăng nhập thất bại")
+
+        self.username = username                                                    # (4)
+        self.session_id = resp["session_id"]
+        self.users = {u["username"]: u for u in resp["users"]}
+        if ENABLE_UDP:
+            self._start_udp_session((self.server_host, resp["udp_port"]))
+        self._control_task = asyncio.create_task(self._control_loop())              # (5)
+        if ENABLE_UDP:
+            self.chat.start()
+        self._set_state("AUTHENTICATED", username)                                  # (6)
+        self.events.add("users", users=list(self.users.values()))
+        return True, "ok"
 
     def _start_udp_session(self, server_udp_addr) -> None:
         """HOÀN THIỆN: tạo phiên UDP tới server sau khi AUTH_OK."""

@@ -34,13 +34,20 @@ class UserStore:
         os.replace(tmp, self.path)   # ghi nguyên tử: không bao giờ để file hỏng giữa chừng
 
     def register(self, username: str, password: str) -> tuple[bool, str]:
-        """TODO[B-D1]:
-          - Kiểm tra USERNAME_RE, độ dài mật khẩu >= MIN_PASSWORD, username chưa tồn tại.
-          - salt, h = hash_password(password); lưu {"salt": salt, "hash": h}; self._save() (trong self._lock).
-          - Trả về (True, "ok") hoặc (False, "<lý do>").
-        """
-        raise NotImplementedError("TODO[B-D1] UserStore.register")
+        if not USERNAME_RE.match(username or ""):                          # (1)
+            return False, "tên đăng nhập phải gồm 3-20 ký tự chữ, số hoặc _"
+        if len(password or "") < MIN_PASSWORD:                             # (2)
+            return False, f"mật khẩu phải có ít nhất {MIN_PASSWORD} ký tự"
+        with self._lock:                                                   # (3)
+            if username in self._users:                                    # (4)
+                return False, "tên đăng nhập đã tồn tại"
+            salt, h = hash_password(password)                              # (5)
+            self._users[username] = {"salt": salt, "hash": h}
+            self._save()                                                   # (6)
+        return True, "ok"
 
     def verify(self, username: str, password: str) -> bool:
-        """TODO[B-D1]: trả về True nếu user tồn tại và verify_password(...) đúng."""
-        raise NotImplementedError("TODO[B-D1] UserStore.verify")
+        record = self._users.get(username)
+        if record is None:                     # không có tài khoản này
+            return False
+        return verify_password(password, record["salt"], record["hash"])

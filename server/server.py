@@ -10,7 +10,7 @@ import argparse
 import asyncio
 import signal
 
-from common.config import (FILE_STREAM_BASE, PROTOCOL_VERSION, STREAM_DIRECT_CHAT,
+from common.config import (ENABLE_UDP, FILE_STREAM_BASE, PROTOCOL_VERSION, STREAM_DIRECT_CHAT,
                            STREAM_GLOBAL_CHAT, TCP_PORT, UDP_PORT)
 from common.crypto import KeyExchange, SessionKeys
 from common.log import get_logger, setup_logging
@@ -95,35 +95,71 @@ class CollabServer:
             await self._cleanup(client, ch)
 
     async def _key_exchange(self, ch: ControlChannel) -> SessionKeys:
-        """TODO[A-D1]:
-          1. kx = KeyExchange()
-          2. msg = expect(await ch.recv(timeout=HANDSHAKE_TIMEOUT), T.KEY_EXCHANGE)  # khóa công khai của client
-          3. await ch.send(make(T.KEY_EXCHANGE, public_key=kx.public_bytes().hex()))   # gửi RÕ, trước khi bật mã hóa
-          4. keys = kx.derive(bytes.fromhex(msg["public_key"]))
-          5. ch.enable_encryption(keys.tcp_key); return keys
-        Ghi vào báo cáo: chưa xác thực khóa công khai -> vẫn có thể bị MITM (giới hạn đã biết).
-        """
-        raise NotImplementedError("TODO[A-D1] CollabServer._key_exchange")
+            kx = KeyExchange()                                                        # (1)
+            msg = expect(await ch.recv(timeout=HANDSHAKE_TIMEOUT), T.KEY_EXCHANGE)    # (2)
+            try:
+                peer_public = bytes.fromhex(msg["public_key"])                        # (3)
+            except (KeyError, ValueError) as exc:
+                raise ProtocolError("public_key không hợp lệ") from exc
+            if len(peer_public) != 32:                                                # (4)
+                raise ProtocolError("public_key phải dài 32 byte")
+            await ch.send(make(T.KEY_EXCHANGE, public_key=kx.public_bytes().hex()))   # (5)
+            keys = kx.derive(peer_public)                                             # (6)
+            ch.enable_encryption(keys.tcp_key)                                        # (7)
+            log.info("trao khóa xong với %s, kênh TCP đã mã hóa", ch.peername)
+            return keys                                                               # (8)
 
     async def _authenticate(self, ch: ControlChannel, keys: SessionKeys) -> ClientSession:
-        """TODO[B-D1]: lặp nhận message với timeout AUTH_TIMEOUT:
-          - REGISTER {username, password}: self.users.register(...)
-                -> trả AUTH_FAIL{reason} nếu lỗi, hoặc make(T.REGISTER, ok=True) nếu thành công; tiếp tục lặp
-          - AUTH_REQ {username, password, udp_port}:
-                * sai mật khẩu -> AUTH_FAIL {reason}; tiếp tục lặp (có thể giới hạn 5 lần)
-                * đã online   -> AUTH_FAIL {reason: "đã đăng nhập ở nơi khác"}
-                * đúng: client = ClientSession(username, self.sessions.new_session_id(), ch,
-                                               ip=ch.peername[0], udp_port=msg["udp_port"])
-                        self.sessions.add(client)
-                        self._start_udp_session(client, keys)
-                        await ch.send(make(T.AUTH_OK, session_id=..., udp_port=self.udp_port,
-                                           users=self.sessions.online_users()))
-                        await self.sessions.broadcast(make(T.USER_JOIN, user=client.public_info()),
-                                                      exclude=client.username)
-                        self.sessions.print_table(); return client
-          - message khác -> raise ProtocolError
-        """
-        raise NotImplementedError("TODO[B-D1] CollabServer._authenticate")
+        failures = 0
+        while True:
+            msg = await ch.recv(timeout=AUTH_TIMEOUT)                          # (1)
+            mtype = msg.get("type")
+            username = str(msg.get("username", ""))
+            password = str(msg.get("password", ""))
+
+            if mtype == T.REGISTER:                                            # (2)
+                ok, reason = await asyncio.to_thread(self.users.register, username, password)
+                if ok:
+                    log.info("đăng ký tài khoản mới: %s", username)
+                    await ch.send(make(T.REGISTER, ok=True))
+                else:
+                    await ch.send(make(T.AUTH_FAIL, reason=reason))
+                continue
+
+            if mtype != T.AUTH_REQ:                                            # (3)
+                raise ProtocolError(f"mong đợi REGISTER hoặc AUTH_REQ, nhận {mtype}")
+
+            if not await asyncio.to_thread(self.users.verify, username, password):                   # (4)
+                failures += 1
+                log.warning("đăng nhập sai từ %s (user=%r, lần %d)", ch.peername, username, failures)
+                await ch.send(make(T.AUTH_FAIL, reason="sai tên đăng nhập hoặc mật khẩu"))
+                if failures >= 5:
+                    raise ProtocolError("sai mật khẩu quá 5 lần")
+                continue
+
+            try:                                                               # (5)
+                udp_port = int(msg["udp_port"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ProtocolError("thiếu hoặc sai udp_port") from exc
+
+            client = ClientSession(username, self.sessions.new_session_id(), ch,   # (6)
+                                   ip=ch.peername[0], udp_port=udp_port)
+            try:
+                self.sessions.add(client)                                      # (7)
+            except ValueError as exc:
+                await ch.send(make(T.AUTH_FAIL, reason=str(exc)))
+                continue
+
+            if ENABLE_UDP:                                                     # (8)
+                self._start_udp_session(client, keys)
+            await ch.send(make(T.AUTH_OK, session_id=client.session_id, udp_port=self.udp_port,
+                               users=self.sessions.online_users()))            # (9)
+            await self.sessions.broadcast(make(T.USER_JOIN, user=client.public_info()),
+                                          exclude=client.username)             # (10)
+            log.info("%s đăng nhập: IP %s, cổng TCP %d, cổng UDP %d",
+                     username, client.ip, ch.peername[1], client.udp_port)
+            self.sessions.print_table()                                        # (11)
+            return client
 
     def _start_udp_session(self, client: ClientSession, keys: SessionKeys) -> None:
         """Tạo phiên UDP cho client đã xác thực và gắn các task định tuyến. (HOÀN THIỆN)"""
