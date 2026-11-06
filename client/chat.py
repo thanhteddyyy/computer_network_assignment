@@ -41,11 +41,16 @@ class ChatService:
             pass
 
     async def send(self, to: str, text: str) -> None:
-        """TODO[B-D2]:
-          - Kiểm tra đã đăng nhập (self.client.udp không None), text không rỗng, <= MAX_TEXT.
-          - stream_id = STREAM_GLOBAL_CHAT nếu to == "*" ngược lại STREAM_DIRECT_CHAT
-          - payload = json.dumps({"to": to, "text": text}).encode()
-          - await self.client.udp.stream(stream_id).send(payload)
-          (Không tự thêm tin vào events: server sẽ gửi lại bản chính thức kèm msg_id.)
-        """
-        raise NotImplementedError("TODO[B-D2] ChatService.send")
+        """Gửi tin chat lên server: '*' đi stream 1 (chat chung), tên người đi stream 2 (chat riêng)."""
+        if self.client.udp is None:                                            # (1)
+            self.client.events.add("error", reason="chưa đăng nhập, hoặc UDP chưa bật (ENABLE_UDP)")
+            return
+        text = text.strip()                                                    # (2)
+        if not text:
+            return
+        if len(text) > MAX_TEXT:                                               # (3)
+            self.client.events.add("error", reason=f"tin nhắn dài quá {MAX_TEXT} ký tự")
+            return
+        stream_id = STREAM_GLOBAL_CHAT if to == "*" else STREAM_DIRECT_CHAT    # (4)
+        payload = json.dumps({"to": to, "text": text}, ensure_ascii=False).encode()
+        await self.client.udp.stream(stream_id).send(payload)                  # (5)
