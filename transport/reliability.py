@@ -32,6 +32,27 @@ class SentPacket:
 
 # =================================================================== RTT
 class RttEstimator:
+    def __init__(self) -> None:
+        self.srtt: float | None = None
+        self.rttvar: float | None = None
+        self.latest: float | None = None
+        self._rto: float = INITIAL_RTO
+    def update(self, sample: float) -> None:
+        self.latest = sample
+        if self.srtt is None:
+            self.srtt = sample
+            self.rttvar = sample / 2
+        else:
+            self.rttvar = 0.75 * self.rttvar + 0.25 * abs(self.srtt - sample)
+            self.srtt = 0.875 * self.srtt + 0.125 * sample
+        self._rto = max(MIN_RTO, min(self.srtt + 4 * self.rttvar, MAX_RTO))       # ─────────────────────────────────────────────────────────────────
+
+    def backoff(self) -> None:                       # CÓ SẴN: gói hết giờ → RTO nhân đôi, tối đa 8 s
+        self._rto = min(self._rto * 2, MAX_RTO)
+
+    @property
+    def rto(self) -> float:                          # CÓ SẴN: nơi bên ngoài đọc RTO (kẹp thêm một lần cho chắc)
+        return max(MIN_RTO, min(self._rto, MAX_RTO))
     """Ước lượng RTT và tính RTO theo RFC 6298.
 
     Lần đo đầu tiên R:     SRTT = R ;  RTTVAR = R / 2
@@ -49,7 +70,14 @@ class RttEstimator:
 
     def update(self, sample: float) -> None:
         # TODO[A-D2]: cập nhật srtt, rttvar, latest và self._rto theo công thức ở docstring.
-        raise NotImplementedError("TODO[A-D2] RttEstimator.update")
+        self.latest = sample
+        if self.srtt is None:
+            self.srtt = sample
+            self.rttvar = sample / 2
+        else:
+            self.rttvar = 0.75 * self.rttvar + 0.25 * abs(self.srtt - sample)
+            self.srtt = 0.875 * self.srtt + 0.125 * sample
+        self._rto = max(MIN_RTO, min(self.srtt + 4 * self.rttvar, MAX_RTO))
 
     def backoff(self) -> None:
         self._rto = min(self._rto * 2, MAX_RTO)
@@ -83,23 +111,30 @@ class SendTracker:
         return len(self.unacked)
 
     def on_ack(self, frame: AckFrame) -> tuple[list[SentPacket], list[SentPacket]]:
-        """Xử lý một AckFrame. Trả về (các gói vừa được ACK, các gói bị xác định là mất).
+        self.peer_recv_window = frame.recv_window                              # (1)
 
-        TODO[A-D2]:
-          1. Cập nhật self.peer_recv_window = frame.recv_window.
-          2. Với mỗi pn trong self.unacked mà frame.contains(pn): lấy ra khỏi unacked -> newly_acked.
-             (Lưu ý: frame có thể chứa pn của gói ACK/PING không có trong unacked -> bỏ qua.)
-          3. Cập nhật self.largest_acked = max(self.largest_acked, frame.largest_acked).
-          4. Ngưỡng gói: pn còn trong unacked và pn + PACKET_THRESHOLD <= largest_acked
-             -> lấy ra khỏi unacked -> lost. Tăng self.total_lost.
-          5. Trả về (newly_acked, lost).
-        """
-        raise NotImplementedError("TODO[A-D2] SendTracker.on_ack")
+        newly_acked: list[SentPacket] = []                                     # (2)
+        for pn in list(self.unacked):
+            if frame.contains(pn):
+                newly_acked.append(self.unacked.pop(pn))
+
+        self.largest_acked = max(self.largest_acked, frame.largest_acked)      # (3)
+
+        lost: list[SentPacket] = []                                            # (4)
+        for pn in list(self.unacked):
+            if pn + PACKET_THRESHOLD <= self.largest_acked:
+                lost.append(self.unacked.pop(pn))
+        self.total_lost += len(lost)
+
+        return newly_acked, lost                                               # (5)
 
     def pop_timed_out(self, now: float, rto: float) -> list[SentPacket]:
         """TODO[A-D2]: lấy ra (xóa khỏi unacked) mọi gói có now - sent_time > rto. Tăng total_lost."""
-        raise NotImplementedError("TODO[A-D2] SendTracker.pop_timed_out")
-
+        timed_out = [p for p in self.unacked.values() if now - p.sent_time > rto]   # (1)
+        for p in timed_out:                                                         # (2)
+            del self.unacked[p.packet_number]
+        self.total_lost += len(timed_out)                                           # (3)
+        return timed_out
     def loss_rate(self) -> float:
         return self.total_lost / self.total_sent if self.total_sent else 0.0
 
@@ -114,29 +149,40 @@ class ReceiveTracker:
         self.first_unacked_time: float | None = None
 
     def on_packet(self, pn: int, ack_eliciting: bool) -> bool:
-        """Ghi nhận gói pn. Trả về True nếu là gói TRÙNG (đã nhận trước đó) -> bên gọi bỏ dữ liệu.
-
-        TODO[A-D2]:
-          - Nếu pn đã có trong self.received -> vẫn đặt ack_pending = True (để bên gửi biết)
-            rồi return True.
-          - Ngược lại: thêm vào received, cập nhật largest.
-          - Nếu ack_eliciting (gói DATA/PING): ack_pending = True, ghi first_unacked_time nếu chưa có.
-          - return False
-        """
-        raise NotImplementedError("TODO[A-D2] ReceiveTracker.on_packet")
+        if pn in self.received:                       # (1) gói TRÙNG
+            self.ack_pending = True
+            return True
+        self.received.add(pn)                         # (2) gói MỚI
+        self.largest = max(self.largest, pn)
+        if ack_eliciting:                             # (3) gói cần được ACK
+            self.ack_pending = True
+            if self.first_unacked_time is None:
+                self.first_unacked_time = time.monotonic()
+        return False
 
     def build_ack(self, now: float | None = None, max_ranges: int = 32) -> AckFrame:
-        """Tạo AckFrame từ self.received.
+        t = now if now is not None else time.monotonic()                 # (1)
 
-        TODO[A-D2]:
-          - Gom các pn đã nhận thành các khoảng liên tiếp, sắp xếp GIẢM dần,
-            chỉ giữ tối đa max_ranges khoảng mới nhất. Ví dụ {0,1,2,4,5,9} -> [(9,9),(4,5),(0,2)]
-          - ack_delay_ms = (now - first_unacked_time) * 1000 (nếu có)
-          - Reset ack_pending = False, first_unacked_time = None
-        Gợi ý: để tránh set phình to, có thể xóa các pn quá cũ (< largest - 10000).
-        """
-        raise NotImplementedError("TODO[A-D2] ReceiveTracker.build_ack")
+        ranges: list[tuple[int, int]] = []                               # (2)
+        for pn in sorted(self.received, reverse=True):
+            if ranges and pn == ranges[-1][0] - 1:
+                ranges[-1] = (pn, ranges[-1][1])
+            elif len(ranges) < max_ranges:
+                ranges.append((pn, pn))
+            else:
+                break
 
+        delay_ms = 0                                                     # (3)
+        if self.first_unacked_time is not None:
+            delay_ms = min(int((t - self.first_unacked_time) * 1000), 65535)
+        self.ack_pending = False                                         # (4)
+        self.first_unacked_time = None
+
+        if len(self.received) > 20000:                                   # (5)
+            cutoff = self.largest - 10000
+            self.received = {pn for pn in self.received if pn >= cutoff}
+
+        return AckFrame(self.largest, self.recv_window, max(delay_ms, 0), ranges)   # (6)
 
 def now() -> float:
     return time.monotonic()

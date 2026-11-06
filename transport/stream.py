@@ -40,18 +40,17 @@ class RecvStream:
         self.bytes_received = 0
 
     def on_data(self, offset: int, data: bytes, fin: bool) -> None:
-        """Nhận một đoạn của stream (có thể đến sai thứ tự hoặc trùng).
-
-        TODO[A-D2]:
-          1. Nếu offset < self.next_offset: đoạn cũ/trùng -> bỏ qua.
-             (Đơn giản hóa: giả định đoạn không bị cắt chồng lấn vì mỗi đoạn luôn được gửi lại nguyên vẹn.)
-          2. Lưu vào self._pending[offset] = (data, fin).
-          3. Lặp: while self.next_offset in self._pending:
-                 lấy đoạn ra, nối vào self._current, next_offset += len(data), bytes_received += len(data)
-                 nếu fin: self._messages.put_nowait(bytes(self._current)); xóa _current
-        Đây chính là chỗ chống HoL: mỗi stream có _pending riêng, stream này chờ không làm stream khác chờ.
-        """
-        raise NotImplementedError("TODO[A-D2] RecvStream.on_data")
+        if offset < self.next_offset or offset in self._pending:      # (1) đoạn cũ hoặc trùng
+            return
+        self._pending[offset] = (data, fin)                            # (2) cất vào chỗ chờ
+        while self.next_offset in self._pending:                       # (3) ghép liên tục
+            chunk, is_fin = self._pending.pop(self.next_offset)
+            self._current += chunk
+            self.next_offset += len(chunk)
+            self.bytes_received += len(chunk)
+            if is_fin:                                                 # (4) đủ một message
+                self._messages.put_nowait(bytes(self._current))
+                self._current.clear()
 
     async def read_message(self) -> bytes:
         """Chờ (không chặn event loop) đến khi có một message hoàn chỉnh."""
