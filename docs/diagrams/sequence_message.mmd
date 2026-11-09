@@ -1,12 +1,30 @@
 sequenceDiagram
-  participant A as Client A
-  participant S as Server
-  participant B as Client B
-  Note over A,S: Đã HELLO, KEY_EXCHANGE, AUTH_OK
-  A->>S: UDP DATA pn=41 stream=1 off=0 FIN {"to":"*","text":"hi"}
-  S-->>A: UDP ACK largest=41
-  S->>B: UDP DATA pn=17 stream=1 {"type":"MSG","from":"A",...}
-  Note over S,B: Gói bị mất trên đường
-  S->>B: (sau RTO) UDP DATA pn=19 stream=1, cùng offset, packet number mới
-  B-->>S: UDP ACK largest=19
-  S->>A: UDP DATA stream=1 (bản xác nhận có msg_id)
+  autonumber
+  participant UI_A as Browser Alice<br/>(Vanilla JS)
+  participant C_A as CollabClient Alice<br/>(ChatService + UdpSession)
+  participant S as CollabServer<br/>(Router + SessionManager)
+  participant C_B as CollabClient Bob<br/>(UdpSession + EventLog)
+  participant UI_B as Browser Bob<br/>(Vanilla JS)
+
+  Note over UI_A,UI_B: VÒNG ĐỜI CỦA MỘT TIN NHẮN CHAT (BROADCAST / UNICAST QUA UDP TIN CẬY)
+
+  UI_A->>C_A: HTTP POST /api/send {"to": "*" hoặc "bob", "text": "Xin chào!"}
+  Note over C_A: 1. Chọn Stream ID:<br/>to="*" -> Stream 1 (Global)<br/>to="bob" -> Stream 2 (Direct)
+  Note over C_A: 2. SendStream.segment():<br/>Gắn offset, cờ Flags.FIN = 1<br/>3. Packet.seal(c2s_key):<br/>Mã hóa AES-256-GCM (Header 21B làm AAD)
+
+  C_A->>S: UDP DATA [pn=10, stream=1, offset=0, FIN=1, Ciphertext+Tag]
+  S-->>C_A: UDP ACK [largest_acked=10, ranges=[(0,10)]] (Gom trễ tối đa 20ms)
+
+  Note over S: 1. Packet.open(c2s_key): Giải mã & xác thực AAD<br/>2. RecvStream.on_data(): Ghép theo offset<br/>3. Router.parse_chat(): Kiểm tra kiểu dữ liệu<br/>4. Đóng gói {"from": "alice", "to": "*", "text": "Xin chào!", "ts": ...}
+
+  par Định tuyến tới mọi người nhận (Broadcast hoặc Unicast)
+    S->>C_B: UDP DATA [pn=25, stream=1, offset=0, FIN=1, AES-GCM(s2c_key)]
+    S->>C_A: UDP DATA [pn=18, stream=1, offset=0, FIN=1, AES-GCM(s2c_key)] (Echo lại cho người gửi)
+  end
+
+  Note over C_B: 1. Packet.open(s2c_key)<br/>2. RecvStream ghép xong (FIN=1)<br/>3. Đẩy vào EventLog (kind="message")
+  C_B-->>S: UDP ACK [largest_acked=25, recv_window=256]
+
+  UI_B->>C_B: HTTP GET /api/events?since=lastId (Short Polling 500ms)
+  C_B-->>UI_B: HTTP 200 OK {"events": [{"kind": "message", "text": "Xin chào!"}]}
+  Note over UI_B: Hiển thị tin nhắn lên khung Chat ngay lập tức

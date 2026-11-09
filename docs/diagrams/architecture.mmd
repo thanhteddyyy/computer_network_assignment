@@ -1,16 +1,76 @@
-flowchart LR
-  subgraph MayA[Máy người dùng A]
-    BA[Trình duyệt<br/>HTML + JS thuần] -- "HTTP polling<br/>127.0.0.1:8081" --> CA[Client Python<br/>UI layer · App logic · Transport]
+flowchart TB
+  %% ============================================================================
+  %% CLIENT A (3-Layer Architecture: UI -> Application -> Transport & Security)
+  %% ============================================================================
+  subgraph ClientA ["MÁY CLIENT A (3 Tầng tách biệt: UI · App Logic · Transport)"]
+    direction TB
+    subgraph UI_A ["1. User Interface Layer"]
+      BrowserA["Trình duyệt Web<br/>(HTML5 + CSS + Vanilla JS)<br/>HTTP Short Polling 500ms"]
+      CLIA["Giao diện CLI<br/>(client/cli.py)"]
+    end
+
+    subgraph App_A ["2. Application & Data Processing Layer"]
+      HttpA["Mini HTTP/1.1 Server<br/>(read_request tự viết)<br/>127.0.0.1:8081"]
+      CoreA["CollabClient & EventLog<br/>ChatService (Stream 1, 2)<br/>FileService (Chunk 1100B, .part, SHA-256 to_thread)"]
+    end
+
+    subgraph Trans_A ["3. Transport & Security Layer"]
+      TCP_A["ControlChannel (TCP)<br/>Framing 4B + ECDH X25519<br/>AES-256-GCM (tcp_key)"]
+      UDP_A["UdpSession (QUIC-like UDP)<br/>Multiplexing Streams (1, 2, 100+id)<br/>SACK · RTT/RTO · CUBIC<br/>AES-256-GCM (c2s/s2c + Header AAD)"]
+      Disc_A["UDP Discovery Listener<br/>(Port 9002)"]
+    end
+
+    BrowserA <-- "HTTP/1.1 GET/POST<br/>(Loopback 127.0.0.1:8081)" --> HttpA
+    HttpA <--> CoreA
+    CLIA <--> CoreA
+    CoreA <--> TCP_A
+    CoreA <--> UDP_A
   end
-  subgraph MayB[Máy người dùng B]
-    BB[Trình duyệt] -- "HTTP<br/>127.0.0.1:8081" --> CB[Client Python]
+
+  %% ============================================================================
+  %% CENTRAL SERVER (Control Plane + Data Plane + Discovery)
+  %% ============================================================================
+  subgraph ServerNode ["COLLAB SERVER (Asyncio Event Loop + Worker Threads)"]
+    direction TB
+    subgraph Srv_Trans ["Transport & Security Layer (Server)"]
+      TCP_S["TCP Server (Port 9000)<br/>Handshake · X25519 · AES-256-GCM"]
+      UDP_S["UdpEndpoint & UdpSessions (Port 9001)<br/>Demux theo session_id · SACK · CUBIC<br/>AES-256-GCM (s2c/c2s)"]
+      Disc_S["UDP Broadcast Announcer<br/>(Port 9002 - mỗi 2s)"]
+    end
+
+    subgraph Srv_App ["Application, Routing & State Management Layer"]
+      AuthS["UserStore (data/users.json)<br/>PBKDF2-HMAC-SHA256 (200k vòng)<br/>Chạy trên asyncio.to_thread()"]
+      SessS["SessionManager<br/>Bảng Online: username, IP,<br/>TCP/UDP port, session_id"]
+      RouterS["Chat Router<br/>Broadcast (*) -> Stream 1<br/>Unicast (DM) -> Stream 2"]
+      RelayS["FileRelay (Zero-Disk RAM Relay)<br/>Điều khiển: OFFER / ACCEPT / DONE<br/>Dữ liệu: Stream 100 + file_id"]
+    end
+
+    TCP_S <--> AuthS
+    TCP_S <--> SessS
+    TCP_S <--> RelayS
+    UDP_S <--> RouterS
+    UDP_S <--> RelayS
+    RouterS <--> SessS
+    RelayS <--> SessS
   end
-  subgraph Srv[Server]
-    S[Session manager · Auth<br/>Router · File relay<br/>Transport]
+
+  %% ============================================================================
+  %% CLIENT B
+  %% ============================================================================
+  subgraph ClientB ["MÁY CLIENT B (Cấu trúc 3 tầng tương tự Client A)"]
+    direction TB
+    BrowserB["Trình duyệt Web (127.0.0.1:8082)<br/>hoặc CLI Client B"]
+    CoreB["CollabClient B<br/>ChatService · FileService"]
+    TransB["ControlChannel (TCP)<br/>+ UdpSession (UDP)"]
+    BrowserB <--> CoreB <--> TransB
   end
-  CA -- "TCP 9000: điều khiển (AES-GCM)" --> S
-  CA <-- "UDP 9001: chat + file (giao thức tin cậy tự viết)" --> S
-  CB -- "TCP 9000" --> S
-  CB <-- "UDP 9001" --> S
-  S -. "UDP broadcast 9002: ANNOUNCE" .-> CA
-  S -. "UDP broadcast 9002" .-> CB
+
+  %% ============================================================================
+  %% NETWORK INTERACTIONS ACROSS LAN
+  %% ============================================================================
+  TCP_A <== "1. Kênh Điều khiển TCP :9000 (AES-256-GCM)<br/>HELLO · KEY_EXCHANGE · AUTH · USER_LIST · FILE_OFFER/ACCEPT/DONE" ==> TCP_S
+  UDP_A <== "2. Kênh Dữ liệu UDP :9001 (Tin cậy + AES-256-GCM)<br/>Stream 1 (Global Chat) · Stream 2 (DM) · Stream 100+id (File Chunks) · SACK · PING/PONG" ==> UDP_S
+  Disc_S -. "3. UDP Broadcast :9002<br/>ANNOUNCE {tcp_port: 9000, udp_port: 9001}" .-> Disc_A
+
+  TCP_S <== "TCP :9000 (Control Plane)" ==> TransB
+  UDP_S <== "UDP :9001 (Data Plane: Chat & Relay File Chunks)" ==> TransB

@@ -1,0 +1,44 @@
+sequenceDiagram
+  autonumber
+  participant A as Client Alice (Sender)
+  participant S as CollabServer (FileRelay)
+  participant B as Client Bob (Receiver)
+
+  Note over A,B: PHA 1: THỎA THUẬN TRUYỀN FILE QUA KÊNH ĐIỀU KHIỂN TCP (:9000 - AES-GCM)
+  Note over A: Đọc kích thước file & tính SHA-256<br/>bằng asyncio.to_thread(sha256_file)
+  A->>S: TCP: FILE_OFFER {client_ref: "r1", to: "bob", name: "data.bin", size: 3300, sha256: "a1b2..."}
+  Note over S: Cấp file_id = 1<br/>Lưu Transfer(status="offered")
+  S-->>A: TCP: FILE_OFFER_ACK {client_ref: "r1", file_id: 1}
+  S->>B: TCP: FILE_OFFER {file_id: 1, from: "alice", name: "data.bin", size: 3300, sha256: "a1b2..."}
+
+  Note over B: 1. Lọc tên file chống Path Traversal<br/>2. Tạo task _receive_file() TRƯỚC (mở file .part)<br/>3. Gửi FILE_ACCEPT
+  B->>S: TCP: FILE_ACCEPT {file_id: 1}
+  Note over S: Đổi status = "accepted"
+  S->>A: TCP: FILE_ACCEPT {file_id: 1}
+
+  Note over A,B: PHA 2: TRUYỀN MẢNH DỮ LIỆU & PHỤC HỒI MẤT GÓI QUA UDP (:9001 - STREAM 101)
+  Note over A: Mở file 'rb', đọc từng CHUNK_SIZE = 1100B<br/>Đẩy lên Stream 101 (100 + file_id)
+
+  A->>S: UDP DATA [pn=1, stream=101, off=0, FIN=1] (Chunk 1: 1100B)
+  Note over S: attach_stream() kích hoạt _relay()<br/>Đổi status = "relaying" (RAM-only, không lưu đĩa)
+  S->>B: UDP DATA [pn=10, stream=101, off=0, FIN=1] (Relay Chunk 1)
+  Note over B: Ghi Chunk 1 vào "1_data.bin.part"
+
+  A--xS: UDP DATA [pn=2, stream=101, off=1100, FIN=1] (Chunk 2 bị RỚT MẠNG!)
+  A->>S: UDP DATA [pn=3, stream=101, off=2200, FIN=1] (Chunk 3: 1100B đến sớm)
+  Note over S: RecvStream cất Chunk 3 (off=2200) vào _pending<br/>Gửi SACK báo khuyết pn=2
+  S-->>A: UDP ACK [largest_acked=3, ranges=[(3,3), (1,1)]]
+
+  Note over A: SendTracker phát hiện mất pn=2<br/>CUBIC điều chỉnh cwnd -> Gửi lại với pn MỚI (pn=6)
+  A->>S: UDP DATA [pn=6, stream=101, off=1100, FIN=1] (Retransmit Chunk 2)
+  Note over S: RecvStream ghép liền mạch off=1100 và off=2200<br/>Chuyển tiếp đủ 2 chunk sang Bob
+  S->>B: UDP DATA [stream=101, off=1100 & off=2200] (Relay Chunk 2 & 3)
+  B-->>S: UDP ACK [Xác nhận đã nhận đủ 3300 byte]
+
+  Note over A,B: PHA 3: KIỂM TRA TOÀN VẸN SHA-256 & ĐỔI TÊN NGUYÊN TỬ
+  Note over B: 1. Đóng file "1_data.bin.part"<br/>2. Tính digest = to_thread(sha256_file, ".part")<br/>3. Khớp sha256 gốc -> os.replace(".part", "1_data.bin")<br/>4. Đổi status = "done"
+  B->>S: TCP: FILE_DONE {file_id: 1, ok: True}
+  Note over S: Xóa Transfer khỏi bộ nhớ Server
+  S->>A: TCP: FILE_DONE {file_id: 1, ok: True}
+  Note over A: Đổi status = "done" (100% Hoàn tất)
+
