@@ -201,25 +201,34 @@ class CollabServer:
             await handler(client, msg)
 
     async def _cleanup(self, client: ClientSession | None, ch: ControlChannel) -> None:
-        """Dọn dẹp khi client rời đi vì BẤT KỲ lý do gì (bước 7).
-        TODO[A-D3]: kiểm tra kỹ mọi đường thoát: LOGOUT, kill client, rút mạng (heartbeat timeout),
-        gói rác, và việc gọi _cleanup hai lần không gây lỗi."""
+        """Dọn dẹp khi client rời đi vì BẤT KỲ lý do gì (bước 7). Gọi nhiều lần không gây lỗi."""
         if client is not None:
-            try:
-                self.sessions.remove(client.username)
-            except NotImplementedError:
-                pass
-            for task in client.tasks:
-                task.cancel()
-            if client.udp is not None:
-                await client.udp.close("client rời đi")
-            await self.files.abort_for(client.username)
-            try:
-                await self.sessions.broadcast(make(T.USER_LEAVE, username=client.username, reason="left"))
+            removed = self.sessions.remove(client.username)                        # (1)
+
+            if client.tasks:                                                       # (2)
+                for task in client.tasks:
+                    task.cancel()
+                await asyncio.gather(*client.tasks, return_exceptions=True)
+                client.tasks.clear()
+
+            if client.udp is not None:                                             # (3)
+                udp = client.udp
+                client.udp = None
+                udp.on_close = None
+                await udp.close("client rời đi")
+
+            await self.files.abort_for(client.username)                            # (4)
+
+            if removed is not None:                                                # (5)
+                await self.sessions.broadcast(
+                    make(T.USER_LEAVE, username=client.username, reason="left")
+                )
                 self.sessions.print_table()
-            except NotImplementedError:
-                pass
-        await ch.close()
+
+        try:                                                                       # (6)
+            await ch.close()
+        except Exception:
+            pass
 
     @staticmethod
     async def _safe_send(ch: ControlChannel, msg: dict) -> None:

@@ -174,22 +174,40 @@ class CollabClient:
         await self._on_disconnect("đăng xuất")
 
     async def _on_disconnect(self, reason: str) -> None:
-        """Dọn dẹp phía client. TODO[A-D3]: đảm bảo gọi nhiều lần không lỗi; các file đang truyền -> failed."""
-        if self.state == "DISCONNECTED":
+        """Dọn dẹp phía client. Đảm bảo gọi nhiều lần không lỗi; các file đang truyền -> failed."""
+        if self.state == "DISCONNECTED":                                           # (1)
             return
-        self.chat.stop()
+        self.state = "DISCONNECTED"                                                # (2)
+
+        self.chat.stop()                                                           # (3)
         if self._control_task and self._control_task is not asyncio.current_task():
             self._control_task.cancel()
-        if self.udp:
-            await self.udp.close(reason)
-        if self.endpoint:
-            self.endpoint.close()
-        if self.ch:
-            await self.ch.close()
-        self.udp = self.endpoint = self.ch = None
-        self.users.clear()
-        self._set_state("DISCONNECTED", reason)
+        self._control_task = None
 
+        if self.udp:                                                               # (4)
+            udp, self.udp = self.udp, None
+            udp.on_close = None
+            await udp.close(reason)
+        if self.endpoint:                                                          # (5)
+            self.endpoint.close()
+            self.endpoint = None
+        if self.ch:                                                                # (6)
+            ch, self.ch = self.ch, None
+            try:
+                await ch.close()
+            except Exception:
+                pass
+
+        self.users.clear()                                                         # (7)
+
+        # (8) Chuyển tất cả các file đang truyền dở sang failed
+        seen = {id(t): t for t in [*self.files.by_ref.values(), *self.files.by_id.values()]}
+        for t in seen.values():
+            if t.status in ("offered", "accepted", "sending", "receiving"):
+                t.status, t.error = "failed", reason
+                self.files._progress(t, force=True)
+
+        self._set_state("DISCONNECTED", reason)                                    # (9)
     # ================================================================ cho UI
     def snapshot(self) -> dict:
         return {
