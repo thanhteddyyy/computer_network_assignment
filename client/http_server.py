@@ -56,30 +56,61 @@ class Request:
 
 # ===================================================================== parse request
 async def read_request(reader: asyncio.StreamReader) -> Request | None:
-    """Đọc và phân tích MỘT HTTP request. Trả về None nếu trình duyệt đóng kết nối trước khi gửi.
+    """Đọc và phân tích MỘT HTTP/1.1 request từ trình duyệt."""
+    # 1. Đọc phần header cho tới dấu phân cách \r\n\r\n
+    try:
+        head = await reader.readuntil(b"\r\n\r\n")                                 # (1)
+    except asyncio.IncompleteReadError as exc:
+        if not exc.partial:
+            return None                                                            # (2) Trình duyệt đóng kết nối sạch
+        raise HttpError(400, "request header bị cắt cụt") from exc
+    except asyncio.LimitOverrunError as exc:
+        raise HttpError(413, "header quá lớn") from exc
 
-    Một request trông như sau (mỗi dòng kết thúc bằng \\r\\n):
-        POST /api/send?x=1 HTTP/1.1\\r\\n
-        Host: localhost:8081\\r\\n
-        Content-Type: application/json\\r\\n
-        Content-Length: 27\\r\\n
-        \\r\\n
-        {"to": "*", "text": "hi"}
+    if len(head) > MAX_HEADER_BYTES:                                               # (3)
+        raise HttpError(413, "header vượt quá MAX_HEADER_BYTES")
 
-    TODO[B-D2]:
-      1. head = await reader.readuntil(b"\\r\\n\\r\\n")
-         - asyncio.IncompleteReadError -> return None (peer đóng)
-         - asyncio.LimitOverrunError hoặc len(head) > MAX_HEADER_BYTES -> raise HttpError(413)
-      2. Tách dòng đầu: method, target, version = lines[0].split(" ", 2)  (sai -> HttpError(400))
-      3. Header: mỗi dòng "Name: value" -> headers[name.strip().lower()] = value.strip()
-      4. url = urlsplit(target); path = unquote(url.path)
-         query = {k: v[0] for k, v in parse_qs(url.query).items()}
-      5. Body: n = int(headers.get("content-length", 0)); n > MAX_BODY_BYTES -> HttpError(413)
-         body = await reader.readexactly(n)   # readexactly vì TCP có thể chia body thành nhiều mảnh
-      6. return Request(method, path, query, headers, body)
-    Lưu ý: StreamReader mặc định giới hạn 64 KB cho readuntil -> start_server đã đặt limit lớn hơn.
-    """
-    raise NotImplementedError("TODO[B-D2] read_request")
+    # 2. Tách dòng đầu (Request Line) và các dòng Header
+    text = head[:-4].decode("latin-1")                                             # (4) Bỏ 4 byte \r\n\r\n ở cuối
+    lines = text.split("\r\n")
+    try:
+        method, target, version = lines[0].split(" ", 2)                           # (5)
+    except ValueError as exc:
+        raise HttpError(400, "request line không hợp lệ") from exc
+    if not version.startswith("HTTP/1."):
+        raise HttpError(400, f"không hỗ trợ {version}")
+
+    # 3. Phân tích các dòng Header: "Name: value"
+    headers: dict[str, str] = {}
+    for line in lines[1:]:                                                         # (6)
+        if not line:
+            continue
+        if ":" not in line:
+            raise HttpError(400, f"header thiếu dấu hai chấm: {line}")
+        name, value = line.split(":", 1)
+        headers[name.strip().lower()] = value.strip()
+
+    # 4. Tách URL path và query string
+    url = urlsplit(target)                                                         # (7)
+    path = unquote(url.path)
+    query = {k: v[0] for k, v in parse_qs(url.query, keep_blank_values=True).items()}
+
+    # 5. Đọc phần Body theo Content-Length (nếu có)
+    try:
+        content_len = int(headers.get("content-length", "0"))                      # (8)
+    except ValueError as exc:
+        raise HttpError(400, "Content-Length không hợp lệ") from exc
+    if content_len < 0:
+        raise HttpError(400, "Content-Length âm")
+    if content_len > MAX_BODY_BYTES:
+        raise HttpError(413, "body vượt quá MAX_BODY_BYTES")
+
+    try:
+        body = await reader.readexactly(content_len) if content_len > 0 else b""   # (9)
+    except asyncio.IncompleteReadError as exc:
+        raise HttpError(400, "body bị ngắt giữa chừng") from exc
+
+    return Request(method.upper(), path, query, headers, body)                     # (10)v
 
 
 # ===================================================================== tạo response

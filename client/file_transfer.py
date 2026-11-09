@@ -11,7 +11,7 @@ from common.config import CHUNK_SIZE, DOWNLOAD_DIR, FILE_STREAM_BASE
 from common.crypto import sha256_file
 from common.log import get_logger
 from common.messages import T, make
-
+from transport.session import SessionClosed
 log = get_logger("files")
 
 
@@ -65,30 +65,60 @@ class FileService:
           - await self.client.ch.send(make(T.FILE_OFFER, client_ref=ref, to=to, name=..., size=..., sha256=...))
           - phát sự kiện file_progress; return ref
         """
-        raise NotImplementedError("TODO[B-D2] FileService.offer")
+        if not os.path.isfile(path):                                             # (1)
+            self.client.events.add("error", reason=f"không tìm thấy file: {path}")
+            return ""
+        size = os.path.getsize(path)                                             # (2)
+        digest = await asyncio.to_thread(sha256_file, path)
+
+        ref = f"r{next(self._refs)}"                                             # (3)
+        t = Transfer(file_id=None, direction="out", peer=to, name=name or os.path.basename(path),
+                     size=size, sha256=digest, path=path, client_ref=ref)
+        self.by_ref[ref] = t
+
+        await self.client.ch.send(make(T.FILE_OFFER, client_ref=ref, to=to,      # (4)
+                                       name=t.name, size=size, sha256=digest))
+        self._progress(t, force=True)
+        return ref
 
     def on_offer_ack(self, msg: dict) -> None:
         """TODO[B-D2]: tìm transfer theo client_ref; có "error" -> status failed; không thì gán file_id,
         thêm vào self.by_id."""
-        raise NotImplementedError("TODO[B-D2] FileService.on_offer_ack")
+        t = self.by_ref.get(msg.get("client_ref"))
+        if t is None:
+            return
+        if msg.get("error"):
+            t.status, t.error = "failed", msg["error"]
+            self.client.events.add("error", reason=f"gửi file {t.name} thất bại: {t.error}")
+        else:
+            t.file_id = msg["file_id"]
+            self.by_id[t.file_id] = t
+        self._progress(t, force=True)
 
     def on_accept(self, msg: dict) -> None:
         """Người nhận đồng ý -> bắt đầu gửi (chạy nền)."""
         t = self.by_id.get(msg["file_id"])
         if t and t.direction == "out":
             t.status = "sending"
+            self._progress(t, force = True)
             asyncio.create_task(self._send_file(t))
 
     async def _send_file(self, t: Transfer) -> None:
-        """TODO[B-D2]:
-          - stream = self.client.udp.stream(FILE_STREAM_BASE + t.file_id)
-          - Mở file 'rb', đọc từng CHUNK_SIZE byte, await stream.send(chunk)   # send() tự chờ khi hàng đợi đầy
-          - t.done_bytes += len(chunk); self._progress(t)
-          - Xong: status vẫn "sending" cho tới khi nhận FILE_DONE từ người nhận.
-          - Bắt lỗi (SessionClosed, OSError) -> status failed, error, self._progress(t, force=True)
-        """
-        raise NotImplementedError("TODO[B-D2] FileService._send_file")
-
+        """Đọc file từng khúc CHUNK_SIZE byte và đẩy lên stream UDP 100 + file_id."""
+        stream = self.client.udp.stream(FILE_STREAM_BASE + t.file_id)
+        try:
+            with open(t.path, "rb") as f:
+                while chunk := f.read(CHUNK_SIZE):
+                    await stream.send(chunk)
+                    t.done_bytes += len(chunk)
+                    self._progress(t)
+            self._progress(t, force=True)
+            log.info("file #%d: đã gửi hết %d byte, chờ xác nhận FILE_DONE", t.file_id, t.done_bytes)
+        except (SessionClosed, OSError) as exc:
+            log.error("file #%d: lỗi khi gửi file: %s", t.file_id, exc)
+            t.status, t.error = "failed", str(exc)
+            self._progress(t, force=True)
+            self.client.events.add("error", reason=f"gửi file {t.name} thất bại: {exc}")
     # ============================================================ phía NHẬN
     def on_offer(self, msg: dict) -> None:
         """Có người muốn gửi file cho mình -> lưu lại và báo UI (UI hiện nút Nhận/Từ chối)."""
@@ -100,7 +130,14 @@ class FileService:
 
     async def accept(self, file_id: int) -> None:
         """TODO[B-D2]: status = "receiving"; tạo task _receive_file(t) TRƯỚC, rồi gửi FILE_ACCEPT."""
-        raise NotImplementedError("TODO[B-D2] FileService.accept")
+        t = self.by_id.get(file_id)
+        if t is None or t.direction != "in" or t.status != "offered":
+            self.client.events.add("error", reason=f"không có lời mời file #{file_id}")
+            return
+        t.status = "receiving"
+        asyncio.create_task(self._receive_file(t))          # sẵn sàng nhận TRƯỚC khi báo đồng ý
+        await self.client.ch.send(make(T.FILE_ACCEPT, file_id=file_id))
+        self._progress(t, force=True)
 
     async def reject(self, file_id: int) -> None:
         t = self.by_id.get(file_id)
@@ -110,17 +147,42 @@ class FileService:
             self._progress(t, force=True)
 
     async def _receive_file(self, t: Transfer) -> None:
-        """TODO[B-D2]:
-          - os.makedirs(DOWNLOAD_DIR, exist_ok=True); ghi vào t.path + ".part"
-          - stream = self.client.udp.stream(FILE_STREAM_BASE + t.file_id)
-          - while t.done_bytes < t.size: chunk = await stream.read_message(); f.write(chunk); cập nhật tiến độ
-          - Kiểm tra sha256_file(.part) == t.sha256 (chạy bằng asyncio.to_thread)
-              đúng -> os.replace(.part, t.path); status done; gửi FILE_DONE {file_id, ok: True}
-              sai  -> xóa .part; status failed; gửi FILE_DONE {file_id, ok: False, reason: "sai hash"}
-          - self._progress(t, force=True)
-        """
-        raise NotImplementedError("TODO[B-D2] FileService._receive_file")
+        """Nhận các chunk từ stream UDP vào file .part, kiểm tra SHA-256 rồi đổi tên thành file hoàn chỉnh."""
+        os.makedirs(os.path.dirname(t.path) or DOWNLOAD_DIR, exist_ok=True)
+        part_path = t.path + ".part"
+        stream = self.client.udp.stream(FILE_STREAM_BASE + t.file_id)
 
+        try:
+            with open(part_path, "wb") as f:
+                while t.done_bytes < t.size:
+                    chunk = await stream.read_message()
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    t.done_bytes += len(chunk)
+                    self._progress(t)
+
+            # Ra khỏi khối 'with' để đóng file hoàn toàn trước khi băm và đổi tên/xóa (bắt buộc trên Windows)
+            digest = await asyncio.to_thread(sha256_file, part_path)
+            if digest == t.sha256:
+                os.replace(part_path, t.path)
+                t.status = "done"
+                await self.client.ch.send(make(T.FILE_DONE, file_id=t.file_id, ok=True))
+                log.info("file #%d: nhận thành công -> %s", t.file_id, t.path)
+            else:
+                os.remove(part_path)
+                t.status, t.error = "failed", "sai hash"
+                await self.client.ch.send(make(T.FILE_DONE, file_id=t.file_id, ok=False, reason="sai hash"))
+                log.warning("file #%d: sai SHA-256, đã xóa file tạm", t.file_id)
+        except (SessionClosed, OSError) as exc:
+            log.error("file #%d: lỗi khi nhận file: %s", t.file_id, exc)
+            if os.path.exists(part_path):
+                os.remove(part_path)
+            t.status, t.error = "failed", str(exc)
+            await self.client.ch.send(make(T.FILE_DONE, file_id=t.file_id, ok=False, reason=str(exc)))
+
+        self._progress(t, force=True)
+        self.client.events.add("file_done", transfer=t.public())
     def on_reject(self, msg: dict) -> None:
         t = self.by_id.get(msg["file_id"])
         if t:

@@ -27,7 +27,21 @@ async def print_events(client: CollabClient) -> None:
                 m = ev["message"]
                 tag = "" if m.get("to") == "*" else " (riêng)"
                 print(f"[{time.strftime('%H:%M:%S', time.localtime(m['ts']))}] {m['from']}{tag}: {m['text']}")
-            elif k in ("user_join", "user_leave", "status", "error", "file_incoming", "file_done"):
+            elif k == "file_incoming":
+                t = ev["transfer"]
+                print(f"* {t['peer']} muốn gửi file #{t['file_id']}: {t['name']} ({t['size']:,} byte)."
+                      f" Gõ /accept {t['file_id']} hoặc /reject {t['file_id']}")
+            elif k == "file_done":
+                t = ev["transfer"]
+                kq = "THÀNH CÔNG" if t["status"] == "done" else f"THẤT BẠI ({t['error']})"
+                print(f"* file #{t['file_id']} {t['name']}: {kq}")
+            elif k == "file_progress":
+                t = ev["transfer"]
+                if t["status"] == "rejected":
+                    print(f"* file {t['name']} bị từ chối: {t['error']}")
+                elif t["status"] == "sending" and t["done_bytes"] == 0:
+                    print(f"* {t['peer']} đã đồng ý, bắt đầu gửi file #{t['file_id']} {t['name']}")
+            elif k in ("user_join", "user_leave", "status", "error"):
                 print(f"* {k}: { {x: y for x, y in ev.items() if x not in ('id', 'kind', 'ts')}}")
         await asyncio.sleep(0.2)
 
@@ -54,6 +68,19 @@ async def repl(client: CollabClient, server: str | None, port: int) -> None:
                         print(f"  {u['username']:<15} {u['ip']}:{u['port']}")
                 elif cmd == "/stats":
                     print(client.udp.stats() if client.udp else "chưa đăng nhập")
+                elif cmd == "/send" and len(parts) == 3:
+                    ref = await client.files.offer(parts[1], parts[2].strip('"'))
+                    if ref:
+                        print(f"đã gửi lời mời ({ref}), chờ người nhận đồng ý...")
+                elif cmd in ("/accept", "/reject") and len(parts) == 2 and parts[1].isdigit():
+                    if cmd == "/accept":
+                        await client.files.accept(int(parts[1]))
+                    else:
+                        await client.files.reject(int(parts[1]))
+                elif cmd == "/files":
+                    for t in client.files.list():
+                        print(f"  #{t['file_id']} {t['direction']:<3} {t['peer']:<10} {t['name']:<25} "
+                              f"{t['status']:<10} {t['progress']:.0%}")                    
                 elif cmd == "/dm" and len(parts) == 3:
                     await client.chat.send(parts[1], parts[2])
                 elif cmd.startswith("/"):

@@ -1,0 +1,13 @@
+stateDiagram-v2
+  [*] --> TCP_ACCEPTED: Client mở kết nối TCP
+  TCP_ACCEPTED --> HANDSHAKEN: Nhận HELLO(v=1) / Gửi HELLO_ACK
+  TCP_ACCEPTED --> CLEANED_UP: Timeout 10s / Sai version / Gói rác
+  HANDSHAKEN --> ENCRYPTED: Nhận & gửi KEY_EXCHANGE (X25519) + Bật AES-256-GCM
+  HANDSHAKEN --> CLEANED_UP: Timeout 10s / Public key sai định dạng
+  ENCRYPTED --> ENCRYPTED: REGISTER hoặc AUTH_FAIL (< 5 lần)
+  ENCRYPTED --> CLEANED_UP: Sai mật khẩu >= 5 lần / Timeout 120s
+  ENCRYPTED --> AUTHENTICATED: AUTH_REQ hợp lệ -> Cấp session_id, mở UdpSession, gửi AUTH_OK, broadcast USER_JOIN
+  AUTHENTICATED --> AUTHENTICATED: Xử lý FILE_OFFER / ACCEPT / REJECT / DONE & Relay UDP streams
+  AUTHENTICATED --> CLEANED_UP: Nhận LOGOUT / Đứt TCP / UDP Heartbeat Timeout (6s)
+  CLEANED_UP --> [*]: _cleanup() xóa session, hủy tasks, abort_for(), broadcast USER_LEAVE
+

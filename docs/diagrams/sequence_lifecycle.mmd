@@ -1,0 +1,38 @@
+sequenceDiagram
+  autonumber
+  participant A as Client Alice
+  participant S as CollabServer
+  participant B as Client Bob
+
+  Note over A,B: 1. Handshake, Trao khóa ECDH X25519 & Đăng nhập (Kênh TCP 9000)
+  A->>S: TCP: HELLO {version: 1}
+  S-->>A: TCP: HELLO_ACK {version: 1}
+  A->>S: TCP: KEY_EXCHANGE {public_key_A}
+  S-->>A: TCP: KEY_EXCHANGE {public_key_S}
+  Note over A,S: HKDF-SHA256 sinh khóa tcp_key, c2s, s2c (Bật AES-256-GCM)
+  A->>S: TCP [AES-GCM]: AUTH_REQ {username: "alice", password, udp_port}
+  S-->>A: TCP [AES-GCM]: AUTH_OK {session_id, udp_port: 9001, users}
+  S-->>B: TCP [AES-GCM]: USER_JOIN {user: alice}
+
+  Note over A,B: 2. Truyền File tin cậy & Chat đồng thời không bị HoL Blocking (Kênh UDP 9001)
+  A->>S: TCP: FILE_OFFER {client_ref: "r1", to: "bob", name, size, sha256}
+  S-->>A: TCP: FILE_OFFER_ACK {client_ref: "r1", file_id: 1}
+  S->>B: TCP: FILE_OFFER {file_id: 1, from: "alice", name, size, sha256}
+  B->>S: TCP: FILE_ACCEPT {file_id: 1}
+  S->>A: TCP: FILE_ACCEPT {file_id: 1}
+
+  par Truyền các mảnh File trên Stream 101 (100 + file_id)
+    A->>S: UDP [Stream 101, offset=0]: Chunk 1 (1100B)
+    S->>B: UDP [Stream 101, offset=0]: Relay Chunk 1 (RAM-only)
+    B-->>S: UDP: ACK Frame (SACK ranges)
+    A->>S: UDP [Stream 101, offset=1100, FIN]: Chunk 2
+    S->>B: UDP [Stream 101, offset=1100, FIN]: Relay Chunk 2
+  and Nhắn tin Chat đồng thời trên Stream 1 (Không bị nghẽn bởi Stream 101)
+    A->>S: UDP [Stream 1, offset=0, FIN]: Chat {"to": "*", "text": "Alo Bob!"}
+    S->>B: UDP [Stream 1, offset=0, FIN]: Broadcast Chat (Hiển thị ngay lập tức!)
+  end
+
+  Note over B: Kiểm tra sha256_file(.part) == sha256 -> os.replace(.part, path)
+  B->>S: TCP: FILE_DONE {file_id: 1, ok: True}
+  S->>A: TCP: FILE_DONE {file_id: 1, ok: True}
+

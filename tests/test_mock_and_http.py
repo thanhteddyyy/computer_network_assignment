@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from client.http_server import build_response, read_request
+from client.http_server import HttpError, build_response, read_request
 from transport.mock_session import MockSession
 from tests._helpers import run_async, todo
 
@@ -45,6 +45,25 @@ class HttpTest(unittest.TestCase):
         reader.feed_eof()
         self.assertIsNone(await read_request(reader))
 
+
+
+    @run_async
+    async def test_bad_request_400(self):
+        # Request line sai định dạng (thiếu HTTP/1.1) -> phải báo lỗi 400
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"GARBAGE_LINE\r\n\r\n")
+        with self.assertRaises(HttpError) as ctx:
+            await read_request(reader)
+        self.assertEqual(ctx.exception.status, 400)
+
+    @run_async
+    async def test_payload_too_large_413(self):
+        # Khai báo Content-Length = 10 GB (vượt quá MAX_BODY_BYTES = 512 MB) -> phải chặn ngay bằng lỗi 413
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"POST /api/upload HTTP/1.1\r\nContent-Length: 10000000000\r\n\r\n")
+        with self.assertRaises(HttpError) as ctx:
+            await read_request(reader)
+        self.assertEqual(ctx.exception.status, 413)
 
 if __name__ == "__main__":
     unittest.main()
