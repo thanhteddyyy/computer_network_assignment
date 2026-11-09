@@ -19,7 +19,7 @@ from typing import Callable
 from common.config import (ACK_DELAY, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, MAX_RETRANSMIT)
 from common.crypto import CryptoError, SessionKeys
 from common.log import get_logger
-from transport.congestion import CongestionController, FixedWindow
+from transport.congestion import CongestionController, Cubic, FixedWindow
 from transport.packet import AckFrame, Flags, Packet, PacketError, PacketType
 from transport.reliability import ReceiveTracker, RttEstimator, SendTracker, SentPacket, now
 from transport.stream import RecvStream, SendStream
@@ -72,8 +72,8 @@ class UdpSession:
         self.sender = SendTracker()
         self.receiver = ReceiveTracker()
         self.rtt = RttEstimator()
-        self.cc = congestion or FixedWindow()   # TODO[A-D2]: đổi thành Cubic() khi Cubic chạy
-
+        # self.cc = congestion or FixedWindow()   # TODO[A-D2]: đổi thành Cubic() khi Cubic chạy
+        self.cc: CongestionController = Cubic()
         self.streams: dict[int, Stream] = {}
         self._queue: deque[_Segment] = deque()
         self._queue_space = asyncio.Event()

@@ -95,6 +95,34 @@ class CubicTest(unittest.TestCase):
         self.assertAlmostEqual(c.cwnd, before * 0.7, places=3)
         c.on_timeout(now=0.2)
         self.assertLessEqual(c.cwnd, 2)
+    @todo
+    def test_cubic_congestion_avoidance_ham_bac_3(self):
+        c = Cubic()
+        c.cwnd = 100.0
+        c.on_loss(now=10.0)  # w_max = 100, cwnd = 70, ssthresh = 70, epoch_start = 10.0
+        self.assertAlmostEqual(c.cwnd, 70.0, places=2)
+
+        # Tại thời điểm t = K (khoảng 4.22 giây sau loss)
+        t_K = 10.0 + c.K
+        c.on_ack(acked_count=1, rtt=0.05, now=t_K)
+        # cwnd phải tiệm cận lại w_max (100)
+        self.assertGreater(c.cwnd, 70.0)
+
+        # Sau mốc K, CUBIC bứt phá vượt qua w_max
+        c.on_ack(acked_count=50, rtt=0.05, now=t_K + 5.0)
+        self.assertGreater(c.cwnd, 100.0)
+
+    @todo
+    def test_cubic_chong_giam_nhieu_lan_trong_cung_rtt(self):
+        c = Cubic()
+        c.cwnd = 50.0
+        c.on_loss(now=1.0)
+        cwnd_sau_loss_1 = c.cwnd
+        self.assertAlmostEqual(cwnd_sau_loss_1, 35.0, places=2)
+
+        # Gói tiếp theo bị mất ngay sau đó 0.02s (cùng đợt mất gói) -> KHÔNG được giảm tiếp
+        c.on_loss(now=1.02)
+        self.assertEqual(c.cwnd, cwnd_sau_loss_1)
 
 
 if __name__ == "__main__":

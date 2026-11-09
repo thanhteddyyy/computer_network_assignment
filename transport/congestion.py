@@ -45,34 +45,54 @@ class FixedWindow(CongestionController):
 
 
 class Cubic(CongestionController):
-    """CUBIC đơn giản hóa (RFC 8312).
-
-    Slow start:   cwnd < ssthresh  ->  cwnd += acked_count     (tăng gấp đôi mỗi RTT)
-    Khi mất gói:  w_max = cwnd ; cwnd = max(MIN_CWND, cwnd * BETA) ; ssthresh = cwnd
-                  epoch_start = now ; K = cbrt(w_max * (1 - BETA) / C)
-    Tránh tắc nghẽn (cwnd >= ssthresh):
-                  t = now - epoch_start
-                  W(t) = C * (t - K)^3 + w_max
-                  nếu W(t) > cwnd: cwnd += (W(t) - cwnd) / cwnd * acked_count
-                  ngược lại:       cwnd += 0.01 * acked_count   (tăng rất chậm)
-    Timeout:      ssthresh = max(MIN_CWND, cwnd/2) ; cwnd = MIN_CWND
-    Chỉ giảm cwnd MỘT lần cho mỗi đợt mất gói (nhiều gói mất cùng RTT là một sự kiện).
-    Nhớ gọi self.log("ack"/"loss"/"timeout") để có dữ liệu vẽ biểu đồ.
-    """
+    """CUBIC đơn giản hóa (RFC 8312)."""
     name = "cubic"
 
     def __init__(self) -> None:
         super().__init__()
-        self.ssthresh: float = float("inf")
-        self.w_max: float = 0.0
-        self.k: float = 0.0
-        self.epoch_start: float | None = None
+        self.ssthresh: float = float("inf")   # Ngưỡng Slow Start ban đầu vô hạn
+        self.w_max: float = INITIAL_CWND
+        self.epoch_start: float = 0.0         # Mốc thời gian bắt đầu chu kỳ tránh tắc nghẽn
+        self.K: float = 0.0                   # Thời gian để đạt lại w_max
+        self.last_loss_at: float = 0.0        # Chống giảm nhiều lần trong cùng 1 RTT
 
     def on_ack(self, acked_count: int, rtt: float, now: float) -> None:
-        raise NotImplementedError("TODO[A-D2] Cubic.on_ack")
+        """Xử lý khi nhận được ACK."""
+        if self.cwnd < self.ssthresh:
+            # 1. Slow Start: tăng theo số gói được ACK (tăng gấp đôi mỗi RTT)
+            self.cwnd += acked_count
+        else:
+            # 2. Congestion Avoidance: hàm bậc 3 CUBIC
+            t = max(0.0, now - self.epoch_start)
+            target_w = CUBIC_C * ((t - self.K) ** 3) + self.w_max
+            if target_w > self.cwnd:
+                self.cwnd += (target_w - self.cwnd) / self.cwnd * acked_count
+            else:
+                self.cwnd += 0.01 * acked_count   # Tăng tối thiểu để không bị đứng yên
+        self.log("ack")
 
     def on_loss(self, now: float) -> None:
-        raise NotImplementedError("TODO[A-D2] Cubic.on_loss")
+        """Xử lý khi phát hiện mất gói (qua SACK hoặc 3 duplicate ACK)."""
+        # Chỉ giảm 1 lần cho mỗi đợt mất gói (cách nhau tối thiểu 0.1s để tránh giảm liên tục cùng 1 RTT)
+        if now - self.last_loss_at < 0.1:
+            return
+        self.last_loss_at = now
+        self.w_max = self.cwnd
+        self.ssthresh = max(float(MIN_CWND), self.cwnd * CUBIC_BETA)
+        self.cwnd = self.ssthresh
+        self.epoch_start = now
+
+        # Tính K = (w_max * (1 - BETA) / C) ** (1/3)
+        diff = max(0.0, self.w_max * (1.0 - CUBIC_BETA))
+        self.K = (diff / CUBIC_C) ** (1.0 / 3.0)
+        self.log("loss")
 
     def on_timeout(self, now: float) -> None:
-        raise NotImplementedError("TODO[A-D2] Cubic.on_timeout")
+        """Xử lý khi xảy ra RTO timeout (nghẽn nghiêm trọng)."""
+        self.ssthresh = max(float(MIN_CWND), self.cwnd / 2.0)
+        self.cwnd = float(MIN_CWND)
+        self.w_max = self.cwnd
+        self.epoch_start = now
+        self.K = 0.0
+        self.last_loss_at = now
+        self.log("timeout")
