@@ -88,21 +88,49 @@ class CollabClient:
         return keys
 
     async def register(self, username: str, password: str) -> tuple[bool, str]:
-        await self.ch.send(make(T.REGISTER, username=username, password=password))
-        resp = await self.ch.recv(timeout=10)
+        if self.state == "CLOSED":
+            return False, "Kết nối TCP đã bị đóng do sai mật khẩu quá 5 lần"
+        if self.ch is None:
+            return False, "chưa kết nối tới server"
+        try:
+            await self.ch.send(make(T.REGISTER, username=username, password=password))
+            resp = await self.ch.recv(timeout=10)
+        except ChannelClosed:
+            await self._on_disconnect("server đã đóng kết nối")
+            self._set_state("CLOSED", "server đã đóng kết nối")
+            return False, "Kết nối TCP đã bị đóng bởi server"
         if resp.get("type") == T.REGISTER and resp.get("ok"):
             return True, "đăng ký thành công"
-        return False, resp.get("reason", "đăng ký thất bại")
-    
+        reason = resp.get("reason", "đăng ký thất bại")
+        if resp.get("disconnect") or resp.get("type") == T.ERROR:
+            await self._on_disconnect(reason)
+            self._set_state("CLOSED", reason)
+        return False, reason
+
     async def login(self, username: str, password: str) -> tuple[bool, str]:
+        if self.state == "CLOSED":
+            return False, "Kết nối TCP đã bị đóng do sai mật khẩu quá 5 lần"
+        if self.ch is None:
+            return False, "chưa kết nối tới server"
         self.endpoint = await UdpEndpoint.open("0.0.0.0", 0, self.loss)             # (1)
-        await self.ch.send(make(T.AUTH_REQ, username=username, password=password,
-                                udp_port=self.endpoint.local_port))                 # (2)
-        resp = await self.ch.recv(timeout=10)
+        try:
+            await self.ch.send(make(T.AUTH_REQ, username=username, password=password,
+                                    udp_port=self.endpoint.local_port))                 # (2)
+            resp = await self.ch.recv(timeout=10)
+        except ChannelClosed:
+            self.endpoint.close()
+            self.endpoint = None
+            await self._on_disconnect("server đã đóng kết nối")
+            self._set_state("CLOSED", "server đã đóng kết nối")
+            return False, "Kết nối TCP đã bị đóng bởi server"
         if resp.get("type") != T.AUTH_OK:                                           # (3)
             self.endpoint.close()
             self.endpoint = None
-            return False, resp.get("reason", "đăng nhập thất bại")
+            reason = resp.get("reason", "đăng nhập thất bại")
+            if resp.get("disconnect") or resp.get("type") == T.ERROR:
+                await self._on_disconnect(reason)
+                self._set_state("CLOSED", reason)
+            return False, reason
 
         self.username = username                                                    # (4)
         self.session_id = resp["session_id"]

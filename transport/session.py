@@ -225,7 +225,8 @@ class UdpSession:
                     self._requeue(timed_out)
                 self._pump()
                 # 3) Heartbeat (client chủ động PING, server trả PONG)
-                if not self.is_server and t - self._last_ping >= HEARTBEAT_INTERVAL:
+                ping_interval = HEARTBEAT_INTERVAL / 2 if (t - self.last_seen >= HEARTBEAT_INTERVAL) else HEARTBEAT_INTERVAL
+                if not self.is_server and t - self._last_ping >= ping_interval:
                     self._last_ping = t
                     self._send_control(PacketType.PING)
                 # 4) Peer im lặng quá lâu -> coi như đã chết

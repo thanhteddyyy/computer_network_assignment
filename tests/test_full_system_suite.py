@@ -147,11 +147,11 @@ class Step03_AuthAndStateTest(unittest.TestCase):
 
     def test_user_register_and_verify_pbkdf2(self):
         """Đăng ký tài khoản mới, kiểm tra mật khẩu đúng/sai và chống trùng tên."""
-        ok, _ = self.store.register("alice", "pass123")
+        ok, _ = self.store.register("alice", "pass1234")
         self.assertTrue(ok)
-        self.assertTrue(self.store.verify("alice", "pass123"))
+        self.assertTrue(self.store.verify("alice", "pass1234"))
         self.assertFalse(self.store.verify("alice", "wrong_pass"))
-        self.assertFalse(self.store.verify("unknown_user", "pass123"))
+        self.assertFalse(self.store.verify("unknown_user", "pass1234"))
 
         # Đăng ký trùng tên phải bị từ chối
         ok_dup, _ = self.store.register("alice", "other_pass")

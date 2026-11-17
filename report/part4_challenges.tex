@@ -1,0 +1,45 @@
+% =============================================================================
+% PHẦN 4: CHALLENGES & SOLUTIONS (1-PAGE REFLECTION)
+% =============================================================================
+\section{Challenges \& Solutions (1-Page Reflection)}
+
+Phần này đúc kết 5 thách thức kỹ thuật cốt lõi gặp phải khi xây dựng ứng dụng mạng từ tầng socket thô và giải pháp khắc phục của nhóm:
+
+\subsection{1. Xử lý Phân mảnh Gói tin IP \& Dính gói TCP (Packet Fragmentation \& Sticky Frames)}
+\begin{itemize}
+    \item \textbf{Thách thức:} TCP là byte-stream nên các bản tin JSON dễ bị dính vào nhau khi nhận liên tiếp (\texttt{JSONDecodeError}). Ngược lại, nếu gửi file lớn bằng một datagram UDP duy nhất, tầng IP sẽ chia thành nhiều mảnh (\textit{IP Fragmentation}); chỉ cần mất 1 mảnh IP thì cả gói lớn bị hủy hoàn toàn.
+    \item \textbf{Giải pháp:} 
+    \begin{itemize}
+        \item Trên TCP: Thiết kế đóng khung \textbf{4-byte Big-Endian Length-Prefixed Framing} (\texttt{common/framing.py}) và giới hạn \texttt{MAX\_FRAME\_SIZE = 1 MB}.
+        \item Trên UDP: Cắt dữ liệu file thành các chunk an toàn $\text{CHUNK\_SIZE} = 1100\text{ B}$. Tổng kích thước gói: $21\text{B (Header)} + 1100\text{B (Data)} + 16\text{B (Tag)} = 1137\text{B} \le 1200\text{B (Safe MTU)}$, loại bỏ hoàn toàn phân mảnh IP.
+    \end{itemize}
+\end{itemize}
+
+\subsection{2. Giải quyết Nghẽn Event Loop \& Deadlock (Event Loop Blocking \& Deadlocks)}
+\begin{itemize}
+    \item \textbf{Thách thức:} Ban đầu, khi 20 Clients đồng thời kết nối và đăng nhập, các Client sau bị \texttt{TimeoutError} do độ trễ vọt lên $2.256\text{ ms}$. Nguyên nhân do hàm băm mật khẩu \texttt{PBKDF2} ($200.000$ vòng, $\approx 110\text{ ms}$ CPU) và băm \texttt{SHA-256} file lớn chạy trực tiếp trên Event Loop đơn luồng của \texttt{asyncio}. Ngoài ra, việc nhiều coroutine cùng ghi socket TCP gây nguy cơ xen kẽ byte.
+    \item \textbf{Giải pháp:} 
+    \begin{itemize}
+        \item Đẩy toàn bộ tác vụ nặng (\texttt{PBKDF2}, \texttt{sha256\_file}) sang worker thread bằng \textbf{\texttt{await asyncio.to\_thread(...)}}. Độ trễ phản hồi khi 20 clients vào cùng lúc giảm từ $2.256\text{ ms}$ xuống chỉ còn \textbf{$22\text{ ms}$} (nhanh hơn 100 lần).
+        \item Dùng \texttt{asyncio.Lock()} bảo vệ lệnh ghi TCP, và dùng \texttt{self.\_queue\_space} điều tiết Backpressure hàng đợi UDP (\texttt{MAX\_QUEUE = 512}), tự động kích hoạt đánh thức khi đóng phiên để chống Deadlock.
+    \end{itemize}
+\end{itemize}
+
+\subsection{3. Triệt tiêu Nghẽn Đầu Hàng (Eliminating Head-of-Line Blocking)}
+\begin{itemize}
+    \item \textbf{Thách thức:} Khi truyền file lớn (hàng nghìn gói UDP) trong mạng mất gói, nếu dùng chung số thứ tự duy nhất như TCP, các tin nhắn chat đến sau sẽ bị kẹt trong bộ đệm chờ gói file mất được gửi bù.
+    \item \textbf{Giải pháp:} Hiện thực \textbf{Stream Multiplexing} kiểu Google QUIC: tách số gói vật lý \texttt{packet\_number} khỏi cặp định danh luồng \texttt{(stream\_id, offset)}. Mỗi luồng (\texttt{Stream 1} Chat, \texttt{Stream 101} File) có bộ ghép mảnh \texttt{RecvStream} độc lập. Mất gói ở Stream File chỉ làm dừng luồng file; tin nhắn chat ở Stream 1 vẫn được đẩy lên giao diện người dùng ngay lập tức ($< 1\text{ ms}$).
+\end{itemize}
+
+\subsection{4. Nhập nhằng RTT \& Chống Lặp Nonce AES-GCM khi Truyền lại (RTT Ambiguity \& Nonce Reuse)}
+\begin{itemize}
+    \item \textbf{Thách thức:} Nếu truyền lại gói bị mất với \texttt{packet\_number} cũ, bên gửi không thể phân biệt ACK trả về cho lần gửi nào (bài toán \textit{RTT Ambiguity}), đồng thời cặp \texttt{(Key, Nonce)} của \texttt{AES-256-GCM} bị lặp lại làm lộ khóa mật mã.
+    \item \textbf{Giải pháp:} Thiết kế \texttt{packet\_number} \textbf{tăng đơn điệu tuyệt đối và không bao giờ tái sử dụng}. Khi truyền lại đoạn dữ liệu cũ, hệ thống cấp một \texttt{packet\_number} mới hoàn toàn. Đồng thời tách khóa hai chiều độc lập (\texttt{c2s} và \texttt{s2c} sinh từ \texttt{HKDF-SHA256}) triệt tiêu hoàn toàn nguy cơ trùng Nonce.
+\end{itemize}
+
+\subsection{5. Khóa File trên Windows (\texttt{WinError 32}) \& Thu hồi Lũy đẳng khi Đứt mạng}
+\begin{itemize}
+    \item \textbf{Thách thức:} Khi một Client tắt đột ngột lúc đang truyền file, trên Windows việc gọi \texttt{os.replace} hay \texttt{os.remove} trong khi file handle chưa đóng sẽ bị lỗi \texttt{PermissionError [WinError 32]}. Ngoài ra, cả TCP và UDP cùng báo mất kết nối dễ gây xung đột dọn dẹp tài nguyên.
+    \item \textbf{Giải pháp:} Phía nhận ghi file tạm \texttt{.part}, đóng hẳn khối \texttt{with open} trước khi tính hash, chỉ đổi tên \texttt{os.replace} khi khớp SHA-256 $100\%$. Phía Server triển khai dọn dẹp lũy đẳng (\textbf{Idempotent Cleanup}) trong \texttt{\_cleanup()} và \texttt{FileRelay.abort\_for()}, tự động hủy phiên file mồ côi và báo \texttt{FILE\_DONE(ok=False)} cho người còn lại.
+\end{itemize}
+

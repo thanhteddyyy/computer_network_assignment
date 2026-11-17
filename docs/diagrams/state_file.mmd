@@ -1,15 +1,24 @@
 stateDiagram-v2
-  [*] --> offered: Sender gửi FILE_OFFER -> Server cấp file_id & báo Receiver
-  offered --> rejected: Receiver gửi FILE_REJECT
-  offered --> accepted: Receiver gửi FILE_ACCEPT
-  offered --> aborted: Sender hoặc Receiver mất kết nối (abort_for)
-  accepted --> relaying: Sender đẩy chunk đầu tiên lên UDP stream (100 + file_id)
-  relaying --> relaying: Server chuyển tiếp từng chunk (1100B) trong RAM -> Receiver ghi vào .part
-  relaying --> done: Receiver kiểm tra khớp SHA-256 -> os.replace(.part) & gửi FILE_DONE(ok=True)
-  relaying --> failed: Sai SHA-256 -> Receiver xóa .part & gửi FILE_DONE(ok=False)
-  relaying --> aborted: Một bên rớt mạng giữa chừng -> Server/Client hủy & báo FILE_DONE(ok=False)
+  [*] --> offered: FILE_OFFER
+
+  offered --> rejected: FILE_REJECT
+  offered --> accepted: FILE_ACCEPT
+  offered --> aborted: Mất kết nối / Hủy
+
+  accepted --> relaying: Đẩy chunk UDP đầu tiên
+
+  relaying --> done: Khớp SHA-256 (FILE_DONE ok=True)
+  relaying --> failed: Sai SHA-256 (FILE_DONE ok=False)
+  relaying --> aborted: Rớt mạng giữa chừng (abort_for)
+
   rejected --> [*]
   done --> [*]
   failed --> [*]
   aborted --> [*]
 
+  note right of relaying
+    <b>Trong lúc Relaying:</b>
+    - Sender đẩy từng chunk 1100B qua UDP stream
+    - Server forward trực tiếp qua RAM (Zero-Disk)
+    - Receiver nhận ghi nối tiếp vào file .part
+  end note

@@ -7,13 +7,14 @@ import json
 import os
 import re
 import threading
+import time
 
 from common.config import USERS_FILE
 from common.crypto import hash_password, verify_password
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
-MIN_PASSWORD = 4
-
+MIN_PASSWORD = 8
+MAX_PASSWORD = 64
 
 class UserStore:
     def __init__(self, path: str = USERS_FILE) -> None:
@@ -28,20 +29,31 @@ class UserStore:
             return json.load(f)
 
     def _save(self) -> None:
-        tmp = self.path + ".tmp"
+        tmp = self.path + ".tmp" # tao them mot file la file temp sau do
+        # khi nao chep het data rôi moi chep vao file chinh json
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._users, f, indent=2)
-        os.replace(tmp, self.path)   # ghi nguyên tử: không bao giờ để file hỏng giữa chừng
+        for attempt in range(5):
+            try:
+                os.replace(tmp, self.path)   # ghi nguyên tử: không bao giờ để file hỏng giữa chừng
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.01)
 
     def register(self, username: str, password: str) -> tuple[bool, str]:
         if not USERNAME_RE.match(username or ""):                          # (1)
             return False, "tên đăng nhập phải gồm 3-20 ký tự chữ, số hoặc _"
-        if len(password or "") < MIN_PASSWORD:                             # (2)
-            return False, f"mật khẩu phải có ít nhất {MIN_PASSWORD} ký tự"
-        with self._lock:                                                   # (3)
-            if username in self._users:                                    # (4)
+        if len(password or "") < MIN_PASSWORD or len(password or "") > MAX_PASSWORD:                             # (2)
+            return False, f"mật khẩu phải có ít nhất {MIN_PASSWORD} ký tự và không lớn hơn {MAX_PASSWORD}"
+        with self._lock:                                                   # (3) kiểm tra nhanh trước khi băm nặng
+            if username in self._users:
                 return False, "tên đăng nhập đã tồn tại"
-            salt, h = hash_password(password)                              # (5)
+        salt, h = hash_password(password)                                  # (4) băm PBKDF2 song song ngoài lock
+        with self._lock:                                                   # (5) khóa lại để kiểm tra lần cuối và ghi sổ
+            if username in self._users:
+                return False, "tên đăng nhập đã tồn tại"
             self._users[username] = {"salt": salt, "hash": h}
             self._save()                                                   # (6)
         return True, "ok"

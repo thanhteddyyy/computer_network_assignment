@@ -1,9 +1,6 @@
 """Hằng số cấu hình dùng chung. Mọi con số "ma thuật" đều phải nằm ở đây, không rải trong code.
 
-Quy ước TODO trong toàn dự án:  TODO[<người>-D<ngày>]
-    TODO[A-D1]  -> người A làm trong ngày 1
-    TODO[B-D2]  -> người B làm trong ngày 2
-Tìm việc của mình:  grep -rn "TODO\\[A" .   (hoặc "TODO\\[B")
+
 """
 
 # ---------------------------------------------------------------- Cổng mạng
@@ -24,8 +21,8 @@ CHUNK_SIZE = 1100        # 21 (header) + 1100 (payload) + 16 (tag) = 1137 <= 120
 
 # Ánh xạ stream ID
 STREAM_CONTROL = 0       # Dự phòng (ACK/PING không thuộc stream nào)
-STREAM_GLOBAL_CHAT = 1
-STREAM_DIRECT_CHAT = 2
+STREAM_GLOBAL_CHAT = 1   # di lan 101
+STREAM_DIRECT_CHAT = 2     
 FILE_STREAM_BASE = 100   # file_id = k  ->  stream_id = 100 + k
 
 # ---------------------------------------------------------------- Độ tin cậy

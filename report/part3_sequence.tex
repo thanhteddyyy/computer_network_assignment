@@ -1,0 +1,104 @@
+% =============================================================================
+% PHẦN 3: SEQUENCE & STATE DIAGRAMS (SƠ ĐỒ TUẦN TỰ & MÁY TRẠNG THÁI)
+% =============================================================================
+\section{Sequence \& State Diagrams (Sơ đồ Tuần tự \& Máy Trạng thái)}
+
+\subsection{Vòng đời một Tin nhắn Chat (Message Lifecycle)}
+Luồng truyền tin nhắn từ trình duyệt của người gửi (Alice) tới người nhận (Bob) gồm 4 bước:
+\begin{enumerate}
+    \item \textbf{Web UI $\rightarrow$ Local Client:} Trình duyệt gửi \texttt{POST /api/chat \{"to": "*", "text": "..."\}} qua HTTP loopback \texttt{127.0.0.1:8081}.
+    \item \textbf{Mã hóa \& Đóng gói UDP:} \texttt{ChatService} chọn \texttt{Stream 1} (Broadcast) hoặc \texttt{Stream 2} (Direct), mã hóa \texttt{AES-256-GCM} bằng khóa \texttt{c2s} và gửi tới Server trên cổng \texttt{9001}.
+    \item \textbf{Định tuyến tại Server:} \texttt{ChatRouter} giải mã, gửi ACK, gắn \texttt{"from": "alice"} và nhãn thời gian, mã hóa bằng khóa \texttt{s2c} của từng người nhận rồi chuyển tiếp xuống.
+    \item \textbf{Nhận \& Hiển thị:} Client Bob giải mã, gửi ACK, ghi vào \texttt{EventLog}. Trình duyệt Bob lấy tin qua HTTP Short Polling (\texttt{GET /api/events}) và hiển thị.
+\end{enumerate}
+
+% =============================================================================
+% TODO: CHÈN ẢNH SƠ ĐỒ TUẦN TỰ TIN NHẮN (docs/diagrams/sequence_message.mmd)
+% =============================================================================
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.92\textwidth]{images/sequence_message.png}
+    \fbox{\parbox{0.90\textwidth}{\centering \vspace{2.2cm}
+        \textbf{[CHỖ CHÈN ẢNH: Sơ đồ Tuần tự Vòng đời Tin nhắn Chat]}\\
+        \small (Xuất ảnh từ file \texttt{docs/diagrams/sequence\_message.mmd} và thay vào lệnh \texttt{\textbackslash includegraphics})
+    \vspace{2.2cm}}}
+    \caption{Sơ đồ tuần tự vòng đời của một tin nhắn Chat}
+    \label{fig:seq_message}
+\end{figure}
+
+\subsection{Vòng đời Truyền File Tin cậy (File Transfer Lifecycle)}
+Quy trình truyền file dung lượng lớn giữa Alice và Bob phối hợp giữa TCP Control và UDP Data:
+\begin{enumerate}
+    \item \textbf{Thỏa thuận 3 bước qua TCP (Port 9000):}
+    \begin{itemize}
+        \item Alice băm \texttt{SHA-256} trên worker thread (\texttt{asyncio.to\_thread}), gửi \texttt{FILE\_OFFER} lên Server.
+        \item Server cấp \texttt{file\_id}, báo \texttt{FILE\_OFFER} cho Bob.
+        \item Bob gửi \texttt{FILE\_ACCEPT}. Server mở tác vụ chuyển tiếp \texttt{FileRelay} và báo cho Alice bắt đầu gửi.
+    \end{itemize}
+    \item \textbf{Truyền luồng Chunk \& Khôi phục mất gói qua UDP (Port 9001):}
+    \begin{itemize}
+        \item Alice cắt file thành các chunk $1100\text{ byte}$, bơm liên tục vào \texttt{Stream (100 + file\_id)} theo cửa sổ \textbf{CUBIC}.
+        \item Server chuyển tiếp các chunk ngay trong bộ nhớ RAM (\textit{Zero-Disk Relay}) sang Stream của Bob.
+        \item Nếu gói bị rớt, khung \texttt{AckFrame (SACK)} báo dải nhận được, bên gửi phát lại chỉ riêng gói mất.
+        \item Bob nhận dữ liệu, ghi nối tiếp vào file tạm \texttt{downloads/<file>.part}.
+    \end{itemize}
+    \item \textbf{Kiểm tra Toàn vẹn \& Đổi tên Nguyên tử:}
+    \begin{itemize}
+        \item Nhận đủ số byte, Bob đóng file, băm \texttt{SHA-256} trên \texttt{asyncio.to\_thread}.
+        \item Nếu khớp 100\%, đổi tên \texttt{os.replace(.part $\rightarrow$ file)} và gửi \texttt{FILE\_DONE(ok=True)}. Nếu sai, xóa ngay file \texttt{.part} và báo \texttt{FILE\_DONE(ok=False)}.
+    \end{itemize}
+\end{enumerate}
+
+% =============================================================================
+% TODO: CHÈN ẢNH SƠ ĐỒ TUẦN TỰ TRUYỀN FILE (docs/diagrams/sequence_file_transfer.mmd)
+% =============================================================================
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.92\textwidth]{images/sequence_file_transfer.png}
+    \fbox{\parbox{0.90\textwidth}{\centering \vspace{2.2cm}
+        \textbf{[CHỖ CHÈN ẢNH: Sơ đồ Tuần tự Vòng đời Truyền File Tin cậy \& SACK]}\\
+        \small (Xuất ảnh từ file \texttt{docs/diagrams/sequence\_file\_transfer.mmd} và thay vào lệnh \texttt{\textbackslash includegraphics})
+    \vspace{2.2cm}}}
+    \caption{Sơ đồ tuần tự quy trình truyền file tin cậy qua UDP}
+    \label{fig:seq_file}
+\end{figure}
+
+\subsection{Máy Trạng thái Hữu hạn (State Diagrams)}
+
+\subsubsection{Máy Trạng thái Truyền File (\texttt{state\_file.mmd})}
+Quản lý trạng thái truyền file: \texttt{offered} $\rightarrow$ \texttt{accepted} $\rightarrow$ \texttt{relaying} (chuyển tiếp chunk trong RAM, ghi vào \texttt{.part}). Kết thúc tại \texttt{done} (khớp SHA-256), \texttt{failed} (sai SHA-256), hoặc \texttt{aborted} (mất kết nối giữa chừng).
+
+% =============================================================================
+% TODO: CHÈN ẢNH SƠ ĐỒ TRẠNG THÁI FILE (docs/diagrams/state_file.mmd)
+% =============================================================================
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.85\textwidth]{images/state_file.png}
+    \fbox{\parbox{0.88\textwidth}{\centering \vspace{1.8cm}
+        \textbf{[CHỖ CHÈN ẢNH: Máy Trạng thái Truyền File (\texttt{state\_file.mmd})]}\\
+        \small (Xuất ảnh từ file \texttt{docs/diagrams/state\_file.mmd} đã được tối ưu không chồng lấn text)
+    \vspace{1.8cm}}}
+    \caption{Máy trạng thái vòng đời của một phiên truyền tập tin}
+    \label{fig:state_file}
+\end{figure}
+
+\subsubsection{Máy Trạng thái Client \& Server}
+\begin{itemize}
+    \item \textbf{Client (\texttt{state\_client.mmd}):} \texttt{DISCONNECTED} $\rightarrow$ \texttt{CONNECTED} (mở TCP) $\rightarrow$ \texttt{KEY\_EXCHANGED} (xong X25519) $\rightarrow$ \texttt{AUTHENTICATED} (nhận AUTH\_OK, mở UDP) $\rightarrow$ \texttt{DISCONNECTED}.
+    \item \textbf{Server (\texttt{state\_server.mmd}):} \texttt{TCP\_ACCEPTED} $\rightarrow$ \texttt{HANDSHAKEN} $\rightarrow$ \texttt{ENCRYPTED} $\rightarrow$ \texttt{AUTHENTICATED} (phục vụ chat & relay) $\rightarrow$ \texttt{CLEANED\_UP} (thu hồi lũy đẳng qua \texttt{\_cleanup}).
+\end{itemize}
+
+% =============================================================================
+% TODO: CHÈN ẢNH SƠ ĐỒ TRẠNG THÁI CLIENT & SERVER (NẾU CẦN)
+% =============================================================================
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.90\textwidth]{images/state_client_server.png}
+    \fbox{\parbox{0.88\textwidth}{\centering \vspace{1.8cm}
+        \textbf{[CHỖ CHÈN ẢNH: Máy Trạng thái Client \& Server (\texttt{state\_client.mmd} \& \texttt{state\_server.mmd})]}\\
+        \small (Xuất ảnh từ file \texttt{docs/diagrams/state\_client.mmd} và \texttt{state\_server.mmd})
+    \vspace{1.8cm}}}
+    \caption{Máy trạng thái quản lý phiên kết nối tại Client và Server}
+    \label{fig:state_client_server}
+\end{figure}
+

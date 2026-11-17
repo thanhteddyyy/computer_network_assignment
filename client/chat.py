@@ -45,7 +45,7 @@ class ChatService:
         if self.client.udp is None:                                            # (1)
             self.client.events.add("error", reason="chưa đăng nhập, hoặc UDP chưa bật (ENABLE_UDP)")
             return
-        text = text.strip()                                                    # (2)
+        text = text.strip() #clean text before sending                                         # (2)
         if not text:
             return
         if len(text) > MAX_TEXT:                                               # (3)

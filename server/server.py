@@ -132,9 +132,10 @@ class CollabServer:
             if not await asyncio.to_thread(self.users.verify, username, password):                   # (4)
                 failures += 1
                 log.warning("đăng nhập sai từ %s (user=%r, lần %d)", ch.peername, username, failures)
-                await ch.send(make(T.AUTH_FAIL, reason="sai tên đăng nhập hoặc mật khẩu"))
                 if failures >= 5:
+                    await ch.send(make(T.AUTH_FAIL, reason="sai mật khẩu quá 5 lần, kết nối bị đóng", disconnect=True))
                     raise ProtocolError("sai mật khẩu quá 5 lần")
+                await ch.send(make(T.AUTH_FAIL, reason=f"sai tên đăng nhập hoặc mật khẩu (lần {failures}/5)"))
                 continue
 
             try:                                                               # (5)

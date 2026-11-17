@@ -205,12 +205,26 @@ stateDiagram-v2
 ### 5.3. Máy trạng thái Truyền File (`Transfer`)
 ```mermaid
 stateDiagram-v2
-  [*] --> offered: FILE_OFFER (Cấp file_id)
+  [*] --> offered: FILE_OFFER
   offered --> rejected: FILE_REJECT
   offered --> accepted: FILE_ACCEPT
-  offered --> aborted: Một bên mất kết nối (abort_for)
-  accepted --> relaying: Bắt đầu gửi/nhận chunk trên UDP Stream (100 + file_id)
-  relaying --> done: Đủ size & khớp SHA-256 -> os.replace(.part) + FILE_DONE(ok=True)
-  relaying --> failed: Lệch SHA-256 -> Xóa .part + FILE_DONE(ok=False)
-  relaying --> aborted: Rớt mạng giữa chừng -> Hủy & báo FILE_DONE(ok=False)
+  offered --> aborted: Mất kết nối (abort_for)
+
+  accepted --> relaying: Đẩy chunk UDP đầu tiên
+
+  relaying --> relaying: Chuyển tiếp chunk (1100B)
+  relaying --> done: Khớp SHA-256 -> FILE_DONE(ok=True)
+  relaying --> failed: Sai SHA-256 -> FILE_DONE(ok=False)
+  relaying --> aborted: Rớt mạng giữa chừng
+
+  rejected --> [*]
+  done --> [*]
+  failed --> [*]
+  aborted --> [*]
+
+  note right of relaying
+    Server relay qua RAM (Zero-Disk)
+    Receiver ghi vào .part
+    Đủ size -> đối chiếu SHA-256
+  end note
 ```

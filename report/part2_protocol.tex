@@ -1,0 +1,125 @@
+% =============================================================================
+% PHẦN 2: PROTOCOL SPECIFICATION (ĐẶC TẢ GIAO THỨC)
+% =============================================================================
+\section{Protocol Specification (Đặc tả Giao thức)}
+
+\subsection{Đóng khung Kênh Điều khiển TCP (Length-Prefixed Framing)}
+Để xử lý hiện tượng dính gói và phân mảnh của TCP, mọi bản tin trên cổng \texttt{9000} đều có tiền tố độ dài \textbf{4 byte Big-Endian} (\texttt{uint32}), giới hạn \texttt{MAX\_FRAME\_SIZE = 1 MB}:
+
+\begin{lstlisting}[numbers=none]
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++---------------------------------------------------------------+
+|                Frame Length (4 bytes, uint32 BE)              |
++---------------------------------------------------------------+
+| Random Nonce (12B) [sau khi bat ma hoa AES-GCM]               |
++---------------------------------------------------------------+
+| Plaintext JSON hoac Ciphertext JSON (Length - 28B)            |
++---------------------------------------------------------------+
+| GCM Authentication Tag (16B) [neu bat ma hoa]                 |
++---------------------------------------------------------------+
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\caption{Tập bản tin JSON điều khiển chính trên kênh TCP (Port 9000)}
+\label{tab:tcp_messages}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{|l|c|X|X|}
+\hline
+\textbf{Loại (\texttt{type})} & \textbf{Chiều} & \textbf{Cấu trúc trường dữ liệu} & \textbf{Mục đích xử lý} \\
+\hline
+\texttt{HELLO} & C$\rightarrow$S & \texttt{\{"version": 1, "client\_name": "..."\}} & Bắt tay khởi tạo phiên (timeout 10s). \\
+\hline
+\texttt{HELLO\_ACK} & S$\rightarrow$C & \texttt{\{"version": 1, "server\_name": "..."\}} & Server xác nhận phiên bản. \\
+\hline
+\texttt{KEY\_EXCHANGE} & C$\leftrightarrow$S & \texttt{\{"public\_key": "<64-hex>" \}} & Trao khóa \texttt{X25519}; sau đó bật \texttt{AES-256-GCM}. \\
+\hline
+\texttt{REGISTER} & C$\rightarrow$S & \texttt{\{"username": "...", "password": "..."\}} & Đăng ký; băm \texttt{PBKDF2} ($200.000$ vòng). \\
+\hline
+\texttt{AUTH\_REQ} & C$\rightarrow$S & \texttt{\{"username": "...", "password": "...", "udp\_port": ...\}} & Yêu cầu đăng nhập kèm cổng UDP client. \\
+\hline
+\texttt{AUTH\_OK} & S$\rightarrow$C & \texttt{\{"session\_id": ..., "users": [...]\}} & Đăng nhập thành công, cấp \texttt{session\_id} 32-bit. \\
+\hline
+\texttt{USER\_JOIN / LEAVE} & S$\rightarrow$C & \texttt{\{"user": \{...\}\} / \{"username": "..."\}} & Thông báo thành viên vào/rời phòng. \\
+\hline
+\texttt{FILE\_OFFER} & C$\rightarrow$S$\rightarrow$C & \texttt{\{"file\_id": 1, "to": "...", "name": "...", "size": ..., "sha256": "..."\}} & Thỏa thuận gửi file kèm hash gốc. \\
+\hline
+\texttt{FILE\_ACCEPT / REJECT} & C$\rightarrow$S$\rightarrow$C & \texttt{\{"file\_id": 1\}} / kèm \texttt{"reason"} & Phản hồi đồng ý/từ chối nhận file. \\
+\hline
+\texttt{FILE\_DONE} & C$\rightarrow$S$\rightarrow$C & \texttt{\{"file\_id": 1, "ok": bool, "reason": "..."\}} & Báo hoàn tất kiểm tra SHA-256 (hoặc báo hủy). \\
+\hline
+\end{tabularx}
+\end{table}
+
+\subsection{Cấu trúc Gói tin Nhị phân UDP 21-Byte Header (\texttt{transport/packet.py})}
+Mỗi datagram UDP trên cổng \texttt{9001} bắt đầu bằng \textbf{21 byte Header} cố định (\texttt{struct "!HBBBIIHIH"}):
+
+\begin{lstlisting}[numbers=none]
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-------------------------------+---------------+---------------+
+|         Magic (0xC0DE)        |  Version (1)  |   Type (1-5)  |  Bytes 0..3
++---------------+---------------+---------------+---------------+
+|   Flags (1B)  |              Session ID (Bytes 5..7)          |  Bytes 4..7
++---------------+-----------------------------------------------+
+|   Session ID  |            Packet Number (Bytes 9..11)        |  Bytes 8..11
++---------------+-------------------------------+---------------+
+| Packet Number |          Stream ID (2B)       |  Offset (MSB) |  Bytes 12..15
++---------------+-------------------------------+---------------+
+|                Offset (Bytes 16..18)          | Payload Len...|  Bytes 16..19
++---------------+-------------------------------+---------------+
+| ...Payload Len| AES-256-GCM Payload (Plaintext <= 1100B + 16B Tag)
++---------------+-----------------------------------------------+
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\caption{Ý nghĩa 9 trường trong Header 21 Byte của gói tin UDP}
+\label{tab:udp_header}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{|c|l|c|c|X|}
+\hline
+\textbf{TT} & \textbf{Trường} & \textbf{Vị trí} & \textbf{Kiểu} & \textbf{Ý nghĩa \& Giá trị} \\
+\hline
+1 & \texttt{Magic} & $0..1$ & \texttt{uint16} & \texttt{0xC0DE}: Nhận diện giao thức, loại bỏ ngay gói rác. \\
+\hline
+2 & \texttt{Version} & $2$ & \texttt{uint8} & \texttt{0x01}: Phiên bản giao thức. \\
+\hline
+3 & \texttt{Type} & $3$ & \texttt{uint8} & \texttt{1=DATA}, \texttt{2=ACK}, \texttt{3=PING}, \texttt{4=PONG}, \texttt{5=CLOSE}. \\
+\hline
+4 & \texttt{Flags} & $4$ & \texttt{uint8} & \texttt{0x01 = FIN}: Đánh dấu kết thúc bản tin trên stream. \\
+\hline
+5 & \texttt{Session ID} & $5..8$ & \texttt{uint32} & Định danh phiên do Server cấp lúc đăng nhập (chống đổi cổng NAT). \\
+\hline
+6 & \texttt{Packet Number} & $9..12$ & \texttt{uint32} & Tăng đơn điệu ($0, 1, 2\dots$), không dùng lại khi retransmit. \\
+\hline
+7 & \texttt{Stream ID} & $13..14$ & \texttt{uint16} & \texttt{0=Control/ACK}, \texttt{1=Chat All}, \texttt{2=DM}, \texttt{100+id=File}. \\
+\hline
+8 & \texttt{Offset} & $15..18$ & \texttt{uint32} & Vị trí byte bắt đầu trong stream (phục vụ ghép đúng thứ tự). \\
+\hline
+9 & \texttt{Payload Len} & $19..20$ & \texttt{uint16} & Độ dài payload theo sau Header (gồm cả 16B GCM Tag). \\
+\hline
+\end{tabularx}
+\end{table}
+
+\textbf{Ngân sách MTU an toàn (Chống phân mảnh IP):}
+\[
+\text{Total Datagram} = \underbrace{21\text{ B}}_{\text{Header (AAD)}} + \underbrace{1100\text{ B}}_{\text{Payload Chunk}} + \underbrace{16\text{ B}}_{\text{AES-GCM Tag}} = 1137\text{ B} \le 1200\text{ B (Safe MTU)}
+\]
+
+\subsection{Cấu trúc Khung Xác nhận Chọn lọc (Selective ACK -- SACK)}
+Khi gói có \texttt{Type = 2 (ACK)}, phần payload chứa cấu trúc \texttt{AckFrame} (\texttt{!IHHH} + các dải \texttt{!II}):
+\begin{itemize}
+    \item \texttt{largest\_acked (4B)}: Số thứ tự gói lớn nhất đã nhận.
+    \item \texttt{recv\_window (2B)}: Cửa sổ nhận còn trống (dùng cho Flow Control).
+    \item \texttt{ack\_delay (2B)}: Độ trễ giữ ACK tại máy nhận (phục vụ tính RTT chính xác).
+    \item \texttt{ranges (N $\times$ 8B)}: Danh sách các khoảng \texttt{(start\_pn, end\_pn)} đã nhận liên tục. Giúp bên gửi biết chính xác gói nào bị thiếu để chỉ truyền lại đúng gói đó (\textit{Selective Repeat}).
+\end{itemize}
+
+\subsection{Mật mã & Bảo mật Ứng dụng}
+\begin{itemize}
+    \item \textbf{ECDH X25519 \& HKDF-SHA256:} Trao khóa công khai $32\text{ byte}$ để tạo bí mật chung, sau đó dẫn xuất 3 khóa độc lập: \texttt{tcp\_key} (cho TCP), \texttt{c2s} (Client $\rightarrow$ Server UDP), và \texttt{s2c} (Server $\rightarrow$ Client UDP).
+    \item \textbf{AES-256-GCM trên UDP:} Nonce được tính từ $\text{IV} \oplus \text{packet\_number}$ (không tốn băng thông truyền Nonce). Toàn bộ 21-byte Header được đưa vào \texttt{AAD} (Additional Authenticated Data) để chống giả mạo \texttt{offset} hay \texttt{stream\_id}.
+\end{itemize}
+

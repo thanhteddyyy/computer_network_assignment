@@ -75,6 +75,13 @@ class UdpEndpoint(asyncio.DatagramProtocol):
     def error_received(self, exc: Exception) -> None:
         # Trên Windows: ICMP "port unreachable" -> WinError 10054. Chỉ cần log rồi bỏ qua.
         log.debug("UDP error_received: %s", exc)
+        if (
+            self.transport is not None
+            and not self.transport.is_closing()
+            and getattr(self.transport, "_read_fut", True) is None
+            and hasattr(self.transport, "_loop_reading")
+        ):
+            asyncio.get_running_loop().call_soon(self.transport._loop_reading)
 
 
 def _disable_windows_connreset(transport) -> None:
@@ -82,9 +89,22 @@ def _disable_windows_connreset(transport) -> None:
     if sys.platform != "win32":
         return
     sock = transport.get_extra_info("socket")
+    raw_sock = getattr(sock, "_sock", sock)
     try:
-        import socket
-        SIO_UDP_CONNRESET = 0x9800000C
-        sock.ioctl(SIO_UDP_CONNRESET, False)  # type: ignore[attr-defined]
-    except (AttributeError, OSError, ValueError):
+        import ctypes
+        SIO_UDP_CONNRESET = ctypes.c_ulong(0x9800000C)
+        in_buf = ctypes.c_ulong(0)
+        bytes_returned = ctypes.c_ulong(0)
+        ctypes.windll.ws2_32.WSAIoctl(
+            ctypes.c_size_t(raw_sock.fileno()),
+            SIO_UDP_CONNRESET,
+            ctypes.byref(in_buf),
+            ctypes.sizeof(in_buf),
+            None,
+            0,
+            ctypes.byref(bytes_returned),
+            None,
+            None,
+        )
+    except Exception:
         pass

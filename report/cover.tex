@@ -1,0 +1,208 @@
+\documentclass[a4paper]{article}
+\usepackage{vntex}
+%\usepackage[english,vietnam]{babel}
+%\usepackage[utf8]{inputenc}
+
+%\usepackage[utf8]{inputenc}
+%\usepackage[francais]{babel}
+\usepackage{a4wide,amssymb,epsfig,latexsym,multicol,array,hhline,fancyhdr}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{lastpage}
+\usepackage[lined,boxed,commentsnumbered]{algorithm2e}
+\usepackage{enumerate}
+\usepackage{color}
+\usepackage{graphicx}							% Standard graphics package
+\usepackage{float}
+\usepackage{array}
+\usepackage{tabularx, caption}
+\usepackage{multirow}
+\usepackage[framemethod=tikz]{mdframed}% For highlighting paragraph backgrounds
+\usepackage{multicol}
+\usepackage{rotating}
+\usepackage{pdflscape}
+\usepackage{graphics}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{epsfig}
+\usepackage{tikz}
+\usepackage{listings}
+\usetikzlibrary{arrows,snakes,backgrounds,positioning,calc,shapes.geometric}
+\usepackage{hyperref}
+\hypersetup{urlcolor=blue,linkcolor=black,citecolor=black,colorlinks=true} 
+%\usepackage{pstcol} 								% PSTricks with the standard color package
+
+\newtheorem{theorem}{{\bf Định lý}}
+\newtheorem{property}{{\bf Tính chất}}
+\newtheorem{proposition}{{\bf Mệnh đề}}
+\newtheorem{corollary}[proposition]{{\bf Hệ quả}}
+\newtheorem{lemma}[proposition]{{\bf Bổ đề}}
+
+\everymath{\color{blue}}
+%\usepackage{fancyhdr}
+\setlength{\headheight}{42pt}
+\pagestyle{fancy}
+\fancyhead{} % clear all header fields
+\fancyhead[L]{%
+  \begin{tabular}{@{}c@{\hspace{0.35cm}}l@{}}
+    \raisebox{-0.45\height}{\includegraphics[width=0.95cm,height=0.95cm,keepaspectratio]{01_logobachkhoasang.png}} &
+    \begin{tabular}{@{}l@{}}
+      \textbf{\ttfamily Trường Đại Học Bách khoa - ĐHQG-HCM}\\[-1pt]
+      \textbf{\ttfamily Khoa Khoa học và Kỹ thuật Máy tính}
+    \end{tabular}
+  \end{tabular}%
+}
+\fancyhead[R]{
+	\begin{tabular}{l}
+		\tiny \bf \\
+		\tiny \bf 
+	\end{tabular}  }
+\fancyfoot{} % clear all footer fields
+\fancyfoot[L]{\scriptsize \ttfamily Bài tập lớn môn Mạng Máy Tính (CO3094) - Năm 2026}
+\fancyfoot[R]{\scriptsize \ttfamily Trang {\thepage}/\pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+
+
+%%%
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{3}
+\makeatletter
+\newcounter {subsubsubsection}[subsubsection]
+\renewcommand\thesubsubsubsection{\thesubsubsection .\@alph\c@subsubsubsection}
+\newcommand\subsubsubsection{\@startsection{subsubsubsection}{4}{\z@}%
+                                     {-3.25ex\@plus -1ex \@minus -.2ex}%
+                                     {1.5ex \@plus .2ex}%
+                                     {\normalfont\normalsize\bfseries}}
+\newcommand*\l@subsubsubsection{\@dottedtocline{3}{10.0em}{4.1em}}
+\newcommand*{\subsubsubsectionmark}[1]{}
+\makeatother
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{frame=tb,
+	language=Python,
+	aboveskip=3mm,
+	belowskip=3mm,
+	showstringspaces=false,
+	columns=flexible,
+	basicstyle={\small\ttfamily},
+	numbers=none,
+	numberstyle=\tiny\color{gray},
+	keywordstyle=\color{blue},
+	commentstyle=\color{dkgreen},
+	stringstyle=\color{mauve},
+	breaklines=true,
+	breakatwhitespace=true,
+	tabsize=3,
+	numbers=left,
+	stepnumber=1,
+	numbersep=1pt,    
+	firstnumber=1,
+	numberfirstline=true
+}
+
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\vspace*{-2cm}
+\begin{center}
+{\large ĐẠI HỌC QUỐC GIA THÀNH PHỐ HỒ CHÍ MINH} \\
+{\large TRƯỜNG ĐẠI HỌC BÁCH KHOA} \\
+{\large KHOA KHOA HỌC - KỸ THUẬT MÁY TÍNH}
+\end{center}
+
+\vspace{0.4cm}
+
+\begin{center}
+\includegraphics[width=5.5cm]{01_logobachkhoatoi.png}
+\end{center}
+
+\vspace{0.4cm}
+
+
+\begin{center}
+\begin{tabular}{c}
+\multicolumn{1}{c}{\textbf{\LARGE MẠNG MÁY TÍNH - CO3094}}\\
+	~~\\
+	\hline
+	\\
+\multicolumn{1}{c}{\textbf{\Large Bài tập lớn:}}\\
+	\\
+	
+\textbf{\Large DISTRIBUTED STREAMING-BASED}\\
+
+
+\textbf{\Large CLIENT-SERVER COLLABORATION APPLICATION}\\
+
+	\hline
+\end{tabular}
+\end{center}
+
+\vspace{1.2cm}
+
+\begin{center}
+{\large \textbf{GVHD: Bùi Xuân Giang}}
+\end{center}\\
+\begin{center}
+{\large \textbf{LỚP: L05 - NHÓM }}
+\end{center}
+
+\vspace{0.3cm}
+
+\begin{center}
+{\large
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{|c|c|}
+\hline
+\textbf{MSSV} & \textbf{Họ và tên}\\
+\hline
+2412565 & Châu Mạnh Phát\\
+\hline
+2412628 & Đào Huy Phong\\
+\hline
+2413148 & Hoàng Phạm Tiến Thành\\
+\hline
+2411819 & Trần Duy Nhân\\
+\hline
+2412616 & Trần Minh Tâm\\
+\hline
+\end{tabular}
+}
+\end{center}
+
+\begin{center}
+{\footnotesize TP. HỒ CHÍ MINH, THÁNG 11/2026}
+\end{center}
+\end{titlepage}
+
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+% =============================================================================
+% BÁO CÁO GIẢI TRÌNH KỸ THUẬT (TECHNICAL EXPLANATION REPORT - 4 MỤC CHÍNH)
+% =============================================================================
+
+% 1. System Architecture: A high-level diagram showing how clients and the server interact
+\input{part1_architecture.tex}
+\clearpage
+
+% 2. Protocol Specification: A breakdown of custom packet/message structures
+\input{part2_protocol.tex}
+\clearpage
+
+% 3. Sequence Diagram: A flow chart showing lifecycle of a message and a file transfer
+\input{part3_sequence.tex}
+\clearpage
+
+% 4. Challenges & Solutions: A brief 1-page reflection on network challenges faced
+\input{part4_challenges.tex}
+
+\end{document}

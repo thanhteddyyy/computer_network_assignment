@@ -16,13 +16,13 @@ log = get_logger("sessions")
 
 @dataclass
 class ClientSession:
-    username: str
-    session_id: int
+    username: str #name
+    session_id: int #luu id
     control: ControlChannel             # kênh TCP
-    ip: str
-    udp_port: int
+    ip: str #luu dia chi ip
+    udp_port: int # cong udp
     udp: Any = None                     # UdpSession (hoặc MockSession khi test)
-    joined_at: float = field(default_factory=time.time)
+    joined_at: float = field(default_factory=time.time) #time in
     tasks: list = field(default_factory=list)   # các task nền gắn với client này
 
     def public_info(self) -> dict:
@@ -32,8 +32,8 @@ class ClientSession:
 
 class SessionManager:
     def __init__(self) -> None:
-        self._by_name: dict[str, ClientSession] = {}
-        self._by_id: dict[int, ClientSession] = {}
+        self._by_name: dict[str, ClientSession] = {} # tim theo ten --> check coi co login o may khac ko or find rcv
+        self._by_id: dict[int, ClientSession] = {} # tim theo session de goi tin udp biet dc duong gui.
 
     def new_session_id(self) -> int:
         """session_id ngẫu nhiên 32 bit, khác 0 và chưa dùng (khó đoán hơn số tăng dần)."""

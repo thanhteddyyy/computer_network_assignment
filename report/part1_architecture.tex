@@ -1,0 +1,63 @@
+% =============================================================================
+% PHẦN 1: SYSTEM ARCHITECTURE (KIẾN TRÚC HỆ THỐNG)
+% =============================================================================
+\section{System Architecture (Kiến trúc Hệ thống)}
+
+Hệ thống được xây dựng theo mô hình \textbf{Client--Server kết hợp truyền luồng đa kênh (Multi-Plane Streaming)}, phân tách triệt để giữa tầng giao diện, tầng xử lý nghiệp vụ và tầng giao vận mạng.
+
+\subsection{Sơ đồ Kiến trúc Tổng thể (High-Level Architecture Diagram)}
+
+% =============================================================================
+% TODO: CHÈN ẢNH SƠ ĐỒ KIẾN TRÚC (docs/diagrams/architecture.mmd)
+% =============================================================================
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.95\textwidth]{images/architecture.png}
+    \fbox{\parbox{0.92\textwidth}{\centering \vspace{2.5cm}
+        \textbf{[CHỖ CHÈN ẢNH: Sơ đồ Kiến trúc Tổng thể Hệ thống]}\\
+        \small (Xuất ảnh từ file \texttt{docs/diagrams/architecture.mmd} và thay vào lệnh \texttt{\textbackslash includegraphics})
+    \vspace{2.5cm}}}
+    \caption{Sơ đồ kiến trúc tổng thể Client--Server và các kênh tương tác trong mạng LAN}
+    \label{fig:system_architecture}
+\end{figure}
+
+\subsection{Phân tầng Chức năng (Modular Layering)}
+Mỗi bên Client và Server được thiết kế theo 3 tầng chức năng độc lập:
+\begin{enumerate}
+    \item \textbf{Tầng Giao diện (User Interface Layer):}
+    \begin{itemize}
+        \item \textbf{Web UI (HTML5/CSS/Vanilla JS):} Chạy trên trình duyệt, tương tác với tiến trình Client cục bộ qua HTTP/1.1 trên loopback \texttt{127.0.0.1:8081}. Cập nhật tin nhắn và tiến độ file theo thời gian thực bằng cơ chế \textbf{HTTP Short Polling (500ms)} (\texttt{GET /api/events?since=<id>}), hoàn toàn không dùng WebSocket.
+        \item \textbf{CLI Terminal:} Giao diện dòng lệnh tương tác trực tiếp qua console (\texttt{client/cli.py}).
+    \end{itemize}
+    \item \textbf{Tầng Nghiệp vụ \& Xử lý Dữ liệu (Application Layer):}
+    \begin{itemize}
+        \item \texttt{HttpServer}: Tự phân tích cú pháp HTTP/1.1 bằng socket thô (\texttt{read\_request}), phục vụ REST API.
+        \item \texttt{ChatService}: Kiểm tra dữ liệu và đóng gói tin nhắn chat.
+        \item \texttt{FileService}: Cắt file nguồn thành các khối \texttt{CHUNK\_SIZE = 1100 byte}, ghi file tạm \texttt{.part}, đẩy tính toán \texttt{SHA-256} sang luồng phụ (\texttt{asyncio.to\_thread}) và đổi tên nguyên tử (\texttt{os.replace}).
+    \end{itemize}
+    \item \textbf{Tầng Giao vận \& Mật mã (Transport \& Security Layer):}
+    \begin{itemize}
+        \item \texttt{ControlChannel (TCP)}: Đóng khung tiền tố độ dài 4 byte, mã hóa \texttt{AES-256-GCM} phục vụ kênh điều khiển.
+        \item \texttt{UdpSession (UDP tin cậy kiểu QUIC)}: Header nhị phân 21 byte, đa hợp luồng (\textit{Stream Multiplexing}), xác nhận chọn lọc SACK, ước lượng RTT/RTO, điều khiển tắc nghẽn \textbf{CUBIC} và mã hóa \texttt{AES-256-GCM} hai chiều (\texttt{c2s}/\texttt{s2c}).
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Tương tác Client--Server qua 3 Kênh Mạng LAN}
+\begin{table}[H]
+\centering
+\caption{Ba kênh tương tác mạng chính giữa Client và Server}
+\label{tab:interaction_planes}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{|l|l|c|X|}
+\hline
+\textbf{Kênh (Plane)} & \textbf{Giao thức} & \textbf{Cổng} & \textbf{Vai trò \& Tương tác chính} \\
+\hline
+\textbf{Control Plane} & TCP & \texttt{9000} & Bắt tay \texttt{HELLO}, trao khóa \texttt{X25519}, đăng ký/đăng nhập, đồng bộ danh sách online và thỏa thuận truyền file (\texttt{OFFER} $\rightarrow$ \texttt{ACCEPT} $\rightarrow$ \texttt{DONE}). \\
+\hline
+\textbf{Data Plane} & Reliable UDP & \texttt{9001} & Truyền luồng Chat (\texttt{Stream 1} chung, \texttt{Stream 2} riêng), chuyển tiếp file qua RAM không ghi đĩa (\texttt{Stream 100+id}), gói điều khiển \texttt{ACK (SACK)} và \texttt{PING/PONG}. \\
+\hline
+\textbf{Discovery Plane} & UDP Broadcast & \texttt{9002} & Server phát gói \texttt{ANNOUNCE} mỗi 2s; Client tự dò IP Server mà không cần cấu hình tay. \\
+\hline
+\end{tabularx}
+\end{table}
+

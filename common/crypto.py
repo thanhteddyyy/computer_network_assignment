@@ -108,7 +108,7 @@ def open_packet_payload(keys: DirectionKeys, packet_number: int, ciphertext: byt
 # ============================================================ Mật khẩu
 def hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
     """Trả về (salt_hex, hash_hex). Không bao giờ lưu mật khẩu dạng rõ."""
-    salt = salt or os.urandom(16)
+    salt = salt or os.urandom(16) # moi thi lay cai salt cu moi thi random
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
     return salt.hex(), digest.hex()
 

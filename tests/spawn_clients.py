@@ -15,7 +15,7 @@ from client.client import CollabClient
 from transport.loss_sim import LossSimulator
 
 
-async def bot(i: int, args, ready: asyncio.Barrier, results: dict) -> None:
+async def bot(i: int, args, ready: asyncio.Barrier, done: asyncio.Barrier, results: dict) -> None:
     c = CollabClient(LossSimulator(args.loss))
     name, pw = f"bot{i:02d}", "bot-pass"
     await c.connect(args.server, args.tcp_port)
@@ -26,7 +26,17 @@ async def bot(i: int, args, ready: asyncio.Barrier, results: dict) -> None:
     await ready.wait()
     for k in range(args.m):
         await c.chat.send("*", f"{name} tin {k}")
-    await asyncio.sleep(args.wait)
+    expected = args.n * args.m
+    deadline = time.monotonic() + args.wait
+    while time.monotonic() < deadline:
+        got = sum(1 for e in c.events.since(0) if e["kind"] == "message")
+        if got >= expected:
+            break
+        await asyncio.sleep(0.1)
+    try:
+        await asyncio.wait_for(done.wait(), timeout=args.wait + 2.0)
+    except (asyncio.TimeoutError, asyncio.BrokenBarrierError):
+        pass
     got = sum(1 for e in c.events.since(0) if e["kind"] == "message")
     results[name] = (got, c.udp.stats() if c.udp else None)
     if i >= args.n - args.kill:
@@ -39,9 +49,10 @@ async def bot(i: int, args, ready: asyncio.Barrier, results: dict) -> None:
 
 async def main(args) -> None:
     ready = asyncio.Barrier(args.n)
+    done = asyncio.Barrier(args.n)
     results: dict = {}
     t0 = time.monotonic()
-    outcomes = await asyncio.gather(*(bot(i, args, ready, results) for i in range(args.n)), return_exceptions=True)
+    outcomes = await asyncio.gather(*(bot(i, args, ready, done, results) for i in range(args.n)), return_exceptions=True)
     errors = [o for o in outcomes if isinstance(o, Exception)]
     expected = args.n * args.m
     print(f"\n{args.n} client x {args.m} tin, mất gói giả lập {args.loss:.0%}, {time.monotonic() - t0:.1f}s")
@@ -60,7 +71,7 @@ if __name__ == "__main__":
     ap.add_argument("--server", default="127.0.0.1")
     ap.add_argument("--tcp-port", type=int, default=TCP_PORT)
     ap.add_argument("--loss", type=float, default=0.0)
-    ap.add_argument("--wait", type=float, default=5.0, help="giây chờ sau khi gửi xong")
+    ap.add_argument("--wait", type=float, default=8.0, help="giây chờ sau khi gửi xong")
     ap.add_argument("--kill", type=int, default=0)
     ap.add_argument("--log", default="WARNING")
     a = ap.parse_args()

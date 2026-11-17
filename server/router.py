@@ -63,16 +63,19 @@ class Router:
                 to, text = parse_chat(raw)
                 # (2) Chọn người nhận
                 if to == "*":
-                    stream_id = STREAM_GLOBAL_CHAT
+                    stream_id = STREAM_GLOBAL_CHAT #stream_id = 1
                     targets = [c for c in self.sessions.all() if c.username != sender.username]
                 else:
-                    stream_id = STREAM_DIRECT_CHAT
-                    receiver = self.sessions.get(to)
-                    if receiver is None:
-                        await sender.control.send(make(T.ERROR, reason=f"{to} không online"))
-                        return
-                    targets = [] if receiver is sender else [receiver]
-
+                    stream_id = STREAM_DIRECT_CHAT #strea_id = 2
+                    names = [u.strip() for u in to.split(",") if u.strip()]
+                    targets = []
+                    for name in names:
+                        receiver = self.sessions.get(name)
+                        if receiver is None:
+                            await sender.control.send(make(T.ERROR, reason=f"{name} không online"))
+                            return
+                        if receiver is not sender and receiver not in targets:
+                            targets.append(receiver)                    
                 # (3) Tạo bản chính thức (chỉ khi chắc chắn có tin được gửi đi)
                 out = {
                     "type": "MSG",
