@@ -11,8 +11,9 @@ const ui = {
   me: null,
   state: "DISCONNECTED",
   users: [],
-  active: "*",                 // "*" = phòng chung, hoặc username = chat riêng
-  messages: { "*": [] },       // khóa: "*" hoặc username người kia
+  groups: [],                  // danh sách phòng riêng dạng "alice,bob,carlo"
+  active: "*",                 // "*" = phòng chung, "a,b,c" = phòng nhóm, hoặc username = chat 1-1
+  messages: { "*": [] },       // khóa: "*", roomKey, hoặc username người kia
   unread: {},
   transfers: new Map(),        // khóa: file_id hoặc client_ref
   stats: null,
@@ -71,6 +72,10 @@ $("#send-form").addEventListener("submit", async (e) => {
 
 function chatKeyOf(msg) {
   if (msg.to === "*") return "*";
+  if (msg.to && msg.to.includes(",")) {
+    if (!ui.groups.includes(msg.to)) ui.groups.push(msg.to);
+    return msg.to;
+  }
   return msg.from === ui.me ? msg.to : msg.from;
 }
 
@@ -87,13 +92,37 @@ function addSystem(key, text) {
 function selectChat(key) {
   ui.active = key;
   ui.unread[key] = 0;
-  $("#chat-title").textContent = key === "*" ? "# Phòng chung" : `Nhắn riêng với ${key}`;
-  $("#file-input").disabled = key === "*";
+  const isGroup = key.includes(",");
+  $("#chat-title").textContent = key === "*" ? "# Phòng chung" : isGroup ? `👥 Phòng riêng: ${key}` : `Nhắn riêng với ${key}`;
+  $("#file-input").disabled = key === "*" || isGroup;
   renderAll();
   $("#msg-input").focus();
 }
 
 document.querySelector('[data-chat="*"]').addEventListener("click", () => selectChat("*"));
+
+$("#btn-new-group").addEventListener("click", () => {
+  const box = $("#group-creator");
+  if (!box.hidden) { box.hidden = true; return; }
+  const wrap = $("#group-members");
+  if (!ui.users.length) {
+    wrap.replaceChildren(el("div", { className: "hint" }, "Chưa có người khác online."));
+  } else {
+    wrap.replaceChildren(...ui.users.map((u) =>
+      el("label", {}, el("input", { type: "checkbox", value: u.username }), " " + u.username)
+    ));
+  }
+  box.hidden = false;
+});
+
+$("#btn-create-group").addEventListener("click", () => {
+  const picked = [...document.querySelectorAll('#group-members input[type="checkbox"]:checked')].map((i) => i.value);
+  if (!picked.length) return;
+  const roomKey = [ui.me, ...picked].filter(Boolean).sort().join(",");
+  if (!ui.groups.includes(roomKey)) ui.groups.push(roomKey);
+  $("#group-creator").hidden = true;
+  selectChat(roomKey);
+});
 
 // ------------------------------------------------------------------ file
 $("#file-input").addEventListener("change", async (e) => {
@@ -172,10 +201,26 @@ function renderAll() {
   $("#app-view").hidden = !loggedIn;
   if (!loggedIn) return;
   renderTopbar();
+  renderGroups();
   renderUsers();
   renderMessages();
   renderStats();
   renderTransfers();
+}
+
+function renderGroups() {
+  const list = $("#group-list");
+  if (!ui.groups.length) {
+    list.replaceChildren();
+    return;
+  }
+  list.replaceChildren(...ui.groups.map((g) => {
+    const others = g.split(",").filter((u) => u !== ui.me).join(", ");
+    const btn = el("button", { className: ui.active === g ? "active" : "" }, `👥 ${others}`);
+    if (ui.unread[g]) btn.prepend(el("span", { className: "badge" }, String(ui.unread[g])));
+    btn.addEventListener("click", () => selectChat(g));
+    return el("li", {}, btn);
+  }));
 }
 
 function renderTopbar() {

@@ -58,6 +58,23 @@ class RouterTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertTrue(self.carol_c.stream(STREAM_DIRECT_CHAT)._inbox.empty())   # carol không thấy gì
 
+    async def test_gui_nhom_rieng(self):
+        _, dave_c = tao_user(self.sm, "dave")                      # người ngoài nhóm
+        await self.router.handle_chat(self.alice, chat("bob,carol", "họp nhóm kín"))
+        for phia in (self.alice_c, self.bob_c, self.carol_c):
+            m = await doc(phia, STREAM_DIRECT_CHAT)
+            self.assertEqual((m["from"], m["to"], m["text"]), ("alice", "alice,bob,carol", "họp nhóm kín"))
+        await asyncio.sleep(0.05)
+        self.assertTrue(dave_c.stream(STREAM_DIRECT_CHAT)._inbox.empty())   # dave không thấy gì
+
+        # Bob trả lời lại vào phòng "alice,bob,carol" -> alice và carol đều nhận được
+        await self.router.handle_chat(self.bob, chat("alice,bob,carol", "ok chốt nhé"))
+        for phia in (self.alice_c, self.bob_c, self.carol_c):
+            m = await doc(phia, STREAM_DIRECT_CHAT)
+            self.assertEqual((m["from"], m["to"], m["text"]), ("bob", "alice,bob,carol", "ok chốt nhé"))
+        await asyncio.sleep(0.05)
+        self.assertTrue(dave_c.stream(STREAM_DIRECT_CHAT)._inbox.empty())
+
     async def test_gui_cho_nguoi_khong_online(self):
         await self.router.handle_chat(self.alice, chat("dave", "alo"))
         self.assertEqual(self.alice.control.sent[0]["type"], "ERROR")

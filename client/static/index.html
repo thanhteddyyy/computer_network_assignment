@@ -41,6 +41,15 @@
 
     <nav class="sidebar" aria-label="Cuộc trò chuyện">
       <button class="channel active" data-chat="*"># Phòng chung</button>
+      <div class="side-head">
+        <h2>Phòng riêng</h2>
+        <button type="button" id="btn-new-group" class="mini-btn" title="Tạo phòng chat riêng nhiều người">+ Tạo phòng</button>
+      </div>
+      <div id="group-creator" class="group-box" hidden>
+        <div id="group-members" class="group-members"></div>
+        <button type="button" id="btn-create-group" class="primary mini-btn">Mở phòng</button>
+      </div>
+      <ul id="group-list"></ul>
       <h2>Đang online <span id="online-count"></span></h2>
       <ul id="user-list"></ul>
     </nav>

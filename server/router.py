@@ -65,23 +65,32 @@ class Router:
                 if to == "*":
                     stream_id = STREAM_GLOBAL_CHAT #stream_id = 1
                     targets = [c for c in self.sessions.all() if c.username != sender.username]
+                    canonical_to = to
                 else:
                     stream_id = STREAM_DIRECT_CHAT #strea_id = 2
                     names = [u.strip() for u in to.split(",") if u.strip()]
+                    if not names:
+                        raise ValueError("người nhận không hợp lệ")
                     targets = []
                     for name in names:
+                        if name == sender.username:
+                            continue
                         receiver = self.sessions.get(name)
                         if receiver is None:
                             await sender.control.send(make(T.ERROR, reason=f"{name} không online"))
                             return
-                        if receiver is not sender and receiver not in targets:
-                            targets.append(receiver)                    
+                        if receiver not in targets:
+                            targets.append(receiver)
+                    if len(targets) > 1 or ("," in to and len(targets) >= 1):
+                        canonical_to = ",".join(sorted({sender.username, *(c.username for c in targets)}))
+                    else:
+                        canonical_to = to
                 # (3) Tạo bản chính thức (chỉ khi chắc chắn có tin được gửi đi)
                 out = {
                     "type": "MSG",
                     "msg_id": next(self._ids),
                     "from": sender.username,
-                    "to": to,
+                    "to": canonical_to,
                     "text": text,
                     "ts": time.time(),
                 }
@@ -98,4 +107,4 @@ class Router:
 
                 # (5) Bản xác nhận cho chính người gửi
                 await sender.udp.stream(stream_id).send(payload)
-                log.info("MSG #%d %s -> %s: %d người nhận", out["msg_id"], sender.username, to, len(targets))
+                log.info("MSG #%d %s -> %s: %d người nhận", out["msg_id"], sender.username, canonical_to, len(targets))

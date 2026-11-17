@@ -84,14 +84,21 @@ input {
 .conn.slow::before { background: var(--warn); }
 
 .sidebar { grid-area: side; padding: 1rem; border-right: 1px solid var(--line); overflow-y: auto; }
-.channel, #user-list button {
+.side-head { display: flex; align-items: center; justify-content: space-between; margin: 1.25rem 0 .4rem; }
+.side-head h2 { margin: 0; }
+.mini-btn { padding: .2rem .5rem; font-size: .8rem; }
+.group-box { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: .5rem; margin-bottom: .5rem; }
+.group-members { max-height: 120px; overflow-y: auto; margin-bottom: .4rem; font-size: .88rem; }
+.group-members label { display: flex; align-items: center; gap: .4rem; padding: .15rem 0; cursor: pointer; }
+.group-members input[type="checkbox"] { width: auto; margin: 0; }
+.channel, #user-list button, #group-list button {
   display: block; width: 100%; text-align: left; border: 0; background: none; padding: .4rem .55rem;
   border-radius: 6px;
 }
-.channel.active, #user-list button.active { background: var(--mine); }
-#user-list { list-style: none; padding: 0; margin: 0; }
+.channel.active, #user-list button.active, #group-list button.active { background: var(--mine); }
+#user-list, #group-list { list-style: none; padding: 0; margin: 0; }
 #user-list .addr { display: block; font-size: .78rem; color: var(--muted); }
-#user-list .badge {
+#user-list .badge, #group-list .badge {
   float: right; background: var(--accent); color: var(--accent-ink); border-radius: 999px;
   font-size: .75rem; padding: 0 .45rem;
 }

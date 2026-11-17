@@ -25,7 +25,8 @@ async def print_events(client: CollabClient) -> None:
             k = ev["kind"]
             if k == "message":
                 m = ev["message"]
-                tag = "" if m.get("to") == "*" else " (riêng)"
+                to = m.get("to", "")
+                tag = "" if to == "*" else f" [phòng: {to}]" if "," in to else " (riêng)"
                 print(f"[{time.strftime('%H:%M:%S', time.localtime(m['ts']))}] {m['from']}{tag}: {m['text']}")
             elif k == "file_incoming":
                 t = ev["transfer"]
